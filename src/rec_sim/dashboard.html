@@ -1,0 +1,312 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>RecSim Dashboard</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #0f172a; color: #e2e8f0; min-height: 100vh; }
+.header { background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%); padding: 24px 32px; border-bottom: 1px solid #334155; display: flex; justify-content: space-between; align-items: center; }
+.header h1 { font-size: 24px; font-weight: 600; }
+.header .meta { font-size: 13px; color: #94a3b8; }
+.upload-area { padding: 16px 32px; background: #1e293b; border-bottom: 1px solid #334155; display: flex; align-items: center; gap: 16px; }
+.upload-area label { background: #3b82f6; color: white; padding: 8px 20px; border-radius: 6px; cursor: pointer; font-size: 14px; font-weight: 500; }
+.upload-area label:hover { background: #2563eb; }
+.upload-area input { display: none; }
+.upload-area .filename { color: #94a3b8; font-size: 13px; }
+.grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 20px; padding: 24px 32px; }
+.card { background: #1e293b; border-radius: 12px; padding: 20px; border: 1px solid #334155; }
+.card h3 { font-size: 14px; font-weight: 500; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 16px; }
+.card-wide { grid-column: 1 / -1; }
+.kpi-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px; }
+.kpi { background: #0f172a; border-radius: 8px; padding: 16px; text-align: center; }
+.kpi .value { font-size: 28px; font-weight: 700; color: #f8fafc; }
+.kpi .label { font-size: 12px; color: #64748b; margin-top: 4px; }
+.kpi.good .value { color: #4ade80; }
+.kpi.warn .value { color: #fbbf24; }
+.kpi.bad .value { color: #f87171; }
+.fidelity-bar { height: 8px; background: #334155; border-radius: 4px; margin-top: 8px; overflow: hidden; }
+.fidelity-bar .fill { height: 100%; border-radius: 4px; transition: width 0.5s ease; }
+.chart-container { position: relative; height: 280px; }
+.empty-state { text-align: center; padding: 120px 32px; color: #64748b; }
+.empty-state h2 { font-size: 20px; margin-bottom: 8px; color: #94a3b8; }
+.detail-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.detail-table th { text-align: left; padding: 8px; color: #94a3b8; border-bottom: 1px solid #334155; font-weight: 500; }
+.detail-table td { padding: 8px; border-bottom: 1px solid #1e293b; }
+.detail-table tr:hover td { background: #0f172a; }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <h1>RecSim Simulation Dashboard</h1>
+  <div class="meta" id="meta-info">No report loaded</div>
+</div>
+
+<div class="upload-area">
+  <label for="file-input">Load Report JSON</label>
+  <input type="file" id="file-input" accept=".json">
+  <span class="filename" id="file-name">Choose a simulation report file...</span>
+</div>
+
+<div id="content">
+  <div class="empty-state">
+    <h2>No Report Loaded</h2>
+    <p>Click "Load Report JSON" to visualize simulation results</p>
+  </div>
+</div>
+
+<script>
+const chartInstances = {};
+
+document.getElementById('file-input').addEventListener('change', function(e) {
+  const file = e.target.files[0];
+  if (!file) return;
+  document.getElementById('file-name').textContent = file.name;
+  const reader = new FileReader();
+  reader.onload = function(ev) {
+    try {
+      const report = JSON.parse(ev.target.result);
+      render(report);
+    } catch(err) {
+      alert('Invalid JSON: ' + err.message);
+    }
+  };
+  reader.readAsText(file);
+});
+
+function fidelityColor(f) {
+  if (f >= 0.9) return '#4ade80';
+  if (f >= 0.7) return '#fbbf24';
+  return '#f87171';
+}
+
+function fidelityClass(f) {
+  if (f >= 0.9) return 'good';
+  if (f >= 0.7) return 'warn';
+  return 'bad';
+}
+
+function destroyChart(id) {
+  if (chartInstances[id]) { chartInstances[id].destroy(); delete chartInstances[id]; }
+}
+
+function render(r) {
+  const meta = r.metadata || {};
+  document.getElementById('meta-info').textContent =
+    `${meta.n_agents} agents | ${meta.videos_per_session} videos/session | ${meta.n_archetypes} archetypes | ${meta.timestamp || ''}`;
+
+  const s = r.summary || {};
+  const f = r.fidelity || {};
+  const cat = r.category_breakdown || {};
+  const dl = r.decision_layer || {};
+  const ctx = r.context_analysis || {};
+
+  const fColor = fidelityColor(f.F_overall || 0);
+  const fClass = fidelityClass(f.F_overall || 0);
+
+  document.getElementById('content').innerHTML = `
+    <div class="grid">
+      <!-- KPI Cards -->
+      <div class="card card-wide">
+        <h3>Key Metrics</h3>
+        <div class="kpi-grid">
+          <div class="kpi ${fClass}">
+            <div class="value">${((f.F_overall||0)*100).toFixed(1)}%</div>
+            <div class="label">Fidelity F</div>
+          </div>
+          <div class="kpi">
+            <div class="value">${((s.avg_watch_pct||0)*100).toFixed(1)}%</div>
+            <div class="label">Avg Watch %</div>
+          </div>
+          <div class="kpi">
+            <div class="value">${((s.skip_rate||0)*100).toFixed(1)}%</div>
+            <div class="label">Skip Rate</div>
+          </div>
+          <div class="kpi">
+            <div class="value">${((s.exit_rate||0)*100).toFixed(1)}%</div>
+            <div class="label">Exit Rate</div>
+          </div>
+          <div class="kpi">
+            <div class="value">${((s.like_rate||0)*100).toFixed(1)}%</div>
+            <div class="label">Like Rate</div>
+          </div>
+          <div class="kpi">
+            <div class="value">${((s.comment_rate||0)*100).toFixed(1)}%</div>
+            <div class="label">Comment Rate</div>
+          </div>
+          <div class="kpi">
+            <div class="value">${((s.share_rate||0)*100).toFixed(1)}%</div>
+            <div class="label">Share Rate</div>
+          </div>
+          <div class="kpi">
+            <div class="value">${meta.total_steps||0}</div>
+            <div class="label">Total Steps</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Fidelity Detail -->
+      <div class="card">
+        <h3>Fidelity Metrics</h3>
+        <table class="detail-table">
+          <tr><th>Metric</th><th>Value</th></tr>
+          <tr><td>F Overall</td><td style="color:${fColor}">${(f.F_overall||0).toFixed(4)}</td></tr>
+          <tr><td>KL Divergence</td><td>${(f.watch_ratio_kl||0).toFixed(4)}</td></tr>
+          <tr><td>JS Divergence</td><td>${(f.watch_ratio_js||0).toFixed(4)}</td></tr>
+          <tr><td>Wasserstein</td><td>${(f.watch_ratio_wasserstein||0).toFixed(4)}</td></tr>
+          <tr><td>Target Avg WR</td><td>${(f.target_avg_wr||0).toFixed(4)}</td></tr>
+          <tr><td>Actual Avg WR</td><td>${(f.actual_avg_wr||0).toFixed(4)}</td></tr>
+        </table>
+        <div style="margin-top:12px;font-size:12px;color:#64748b">Fidelity</div>
+        <div class="fidelity-bar"><div class="fill" style="width:${(f.F_overall||0)*100}%;background:${fColor}"></div></div>
+      </div>
+
+      <!-- Watch Ratio Distribution -->
+      <div class="card">
+        <h3>Watch Ratio Distribution (Real vs Simulated)</h3>
+        <div class="chart-container"><canvas id="wr-dist-chart"></canvas></div>
+      </div>
+
+      <!-- Category Breakdown -->
+      <div class="card">
+        <h3>Category Watch %</h3>
+        <div class="chart-container"><canvas id="cat-chart"></canvas></div>
+      </div>
+
+      <!-- Decision Layer -->
+      <div class="card">
+        <h3>Decision Layer Distribution</h3>
+        <div class="chart-container"><canvas id="layer-chart"></canvas></div>
+      </div>
+
+      <!-- L0 Factor Distribution -->
+      <div class="card">
+        <h3>Layer 0 Factor Distribution</h3>
+        <div class="chart-container"><canvas id="l0-chart"></canvas></div>
+      </div>
+
+      <!-- Context: Network -->
+      <div class="card">
+        <h3>Avg Watch % by Network</h3>
+        <div class="chart-container"><canvas id="net-chart"></canvas></div>
+      </div>
+
+      <!-- Context: Session Type -->
+      <div class="card">
+        <h3>Avg Watch % by Session Type</h3>
+        <div class="chart-container"><canvas id="sess-chart"></canvas></div>
+      </div>
+    </div>
+  `;
+
+  // Charts
+  const chartDefaults = { color: '#94a3b8', borderColor: '#334155' };
+  Chart.defaults.color = '#94a3b8';
+  Chart.defaults.borderColor = '#334155';
+
+  // WR Distribution
+  if (f.target_wr_distribution && f.simulated_wr_distribution) {
+    const labels = f.distribution_bin_edges.slice(0,-1).map((v,i) =>
+      (v*100).toFixed(0) + '-' + (f.distribution_bin_edges[i+1]*100).toFixed(0) + '%');
+    destroyChart('wr-dist-chart');
+    chartInstances['wr-dist-chart'] = new Chart(document.getElementById('wr-dist-chart'), {
+      type: 'bar',
+      data: {
+        labels,
+        datasets: [
+          { label: 'Real', data: f.target_wr_distribution, backgroundColor: 'rgba(59,130,246,0.6)', borderColor: '#3b82f6', borderWidth: 1 },
+          { label: 'Simulated', data: f.simulated_wr_distribution, backgroundColor: 'rgba(168,85,247,0.6)', borderColor: '#a855f7', borderWidth: 1 },
+        ]
+      },
+      options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'top' } },
+        scales: { y: { beginAtZero: true, title: { display: true, text: 'Density' } } } }
+    });
+  }
+
+  // Category
+  if (cat.avg_watch_pct) {
+    const cats = Object.keys(cat.avg_watch_pct).sort();
+    destroyChart('cat-chart');
+    chartInstances['cat-chart'] = new Chart(document.getElementById('cat-chart'), {
+      type: 'bar',
+      data: {
+        labels: cats,
+        datasets: [
+          { label: 'Avg Watch %', data: cats.map(c => cat.avg_watch_pct[c] * 100),
+            backgroundColor: 'rgba(34,197,94,0.6)', borderColor: '#22c55e', borderWidth: 1 },
+        ]
+      },
+      options: { responsive: true, maintainAspectRatio: false, indexAxis: 'y',
+        scales: { x: { beginAtZero: true, max: 100, title: { display: true, text: '%' } } } }
+    });
+  }
+
+  // Decision Layer pie
+  if (dl.fidelity_tag_counts) {
+    const tags = Object.entries(dl.fidelity_tag_counts).filter(([k,v]) => v > 0);
+    destroyChart('layer-chart');
+    chartInstances['layer-chart'] = new Chart(document.getElementById('layer-chart'), {
+      type: 'doughnut',
+      data: {
+        labels: tags.map(([k]) => k),
+        datasets: [{ data: tags.map(([,v]) => v),
+          backgroundColor: ['#f87171','#3b82f6','#a855f7','#fbbf24'] }]
+      },
+      options: { responsive: true, maintainAspectRatio: false }
+    });
+  }
+
+  // L0 Factor
+  if (dl.l0_factor_distribution) {
+    const bins = Object.keys(dl.l0_factor_distribution);
+    destroyChart('l0-chart');
+    chartInstances['l0-chart'] = new Chart(document.getElementById('l0-chart'), {
+      type: 'bar',
+      data: {
+        labels: bins,
+        datasets: [{ label: 'Count', data: bins.map(b => dl.l0_factor_distribution[b]),
+          backgroundColor: 'rgba(251,191,36,0.6)', borderColor: '#fbbf24', borderWidth: 1 }]
+      },
+      options: { responsive: true, maintainAspectRatio: false,
+        scales: { y: { beginAtZero: true } } }
+    });
+  }
+
+  // Network
+  if (ctx.by_network) {
+    const nets = Object.keys(ctx.by_network).sort();
+    destroyChart('net-chart');
+    chartInstances['net-chart'] = new Chart(document.getElementById('net-chart'), {
+      type: 'bar',
+      data: {
+        labels: nets,
+        datasets: [{ label: 'Avg Watch %', data: nets.map(n => ctx.by_network[n] * 100),
+          backgroundColor: 'rgba(14,165,233,0.6)', borderColor: '#0ea5e9', borderWidth: 1 }]
+      },
+      options: { responsive: true, maintainAspectRatio: false,
+        scales: { y: { beginAtZero: true, max: 100 } } }
+    });
+  }
+
+  // Session Type
+  if (ctx.by_session_type) {
+    const types = Object.keys(ctx.by_session_type).sort();
+    destroyChart('sess-chart');
+    chartInstances['sess-chart'] = new Chart(document.getElementById('sess-chart'), {
+      type: 'bar',
+      data: {
+        labels: types,
+        datasets: [{ label: 'Avg Watch %', data: types.map(t => ctx.by_session_type[t] * 100),
+          backgroundColor: 'rgba(236,72,153,0.6)', borderColor: '#ec4899', borderWidth: 1 }]
+      },
+      options: { responsive: true, maintainAspectRatio: false,
+        scales: { y: { beginAtZero: true, max: 100 } } }
+    });
+  }
+}
+</script>
+</body>
+</html>
