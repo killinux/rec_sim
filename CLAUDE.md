@@ -37,15 +37,15 @@ python3 -m pytest tests/ -v -s
 - H5 Dashboard at `http://localhost/research/rec_sim/reports/dashboard.html` (Mac)
 - All docs written and pushed
 
-### Latest Fidelity (P1 E2E)
+### Latest Fidelity (after activity normalization)
 ```
 F_overall:   0.440
-F_multidim:  0.406
+F_multidim:  0.489
   category_js:          0.835  ✅ fixed
   correlation:          0.811  ✅ ok
-  watch_ratio_js:       0.385  ⚠️ needs improvement
-  activity_wasserstein: 0.000  ❌ config issue (10 vs 3327 videos/user)
-  conditional_delta:    0.000  ❌ 28% avg deviation per category
+  activity_wasserstein: 0.415  ✅ fixed (was 0.000)
+  watch_ratio_js:       0.385  ⚠️ needs calibration loop
+  conditional_delta:    0.000  ⚠️ 28% deviation, needs calibration loop
 ```
 
 ### Decision Log
@@ -56,11 +56,19 @@ F_multidim:  0.406
   **TODO for later**: Re-run with videos_per_session=100+ to test if higher volume
   changes the fidelity picture. This is a tunable knob, not a code fix.
 
-### Next Steps (priority order)
-1. ~~Fix activity normalization~~ → In progress (normalizing, not increasing volume)
-2. Calibration loop (3 nested loops: outer=persona rebuild, mid=param tune, inner=LLM audit)
-3. Layer 2 LLM integration (Claude API for complex decisions: first-visit, new-category, conflicts)
-4. Vine Copula extrapolation (1000 → 1 billion)
+### Known Issues (come back after MVP)
+- **conditional_delta = 0.278**: 各品类完播率偏差 28%，需要校准环修正
+- **watch_ratio_js = 0.184**: 完播率分布形状差距，需要校准环修正
+- **activity volume**: 当前 videos_per_session=10，可增大到 100+ 重测
+
+### Next Steps — MVP First, Then Iterate
+1. ~~Fix activity normalization~~ → Done (normalized to per-user avg_wr)
+2. **Calibration loop** — 三嵌套循环: outer=persona rebuild, mid=param tune, inner=LLM audit
+3. **Layer 2 LLM integration** — Claude API for complex decisions (first-visit, new-category, conflicts)
+4. **Vine Copula extrapolation** — 1000 → 1 billion
+5. **Evaluation layer** — A/B test framework, algorithm comparison
+
+Goal: run through steps 2→3→4→5 as MVP first, then revisit known issues.
 
 ## Key Documentation
 
