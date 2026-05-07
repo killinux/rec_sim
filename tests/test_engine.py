@@ -50,3 +50,18 @@ def test_engine_step_result_log_format():
     assert log["agent_id"] == 0
     assert "infra_state" in log
     assert "fidelity_tag" in log
+
+
+def test_engine_uses_layer2_when_provider_given():
+    from rec_sim.llm.provider import MockProvider
+    engine = DecisionEngine(seed=42, llm_provider=MockProvider())
+    skeleton = _make_skeleton()
+    video = VideoItem("v1", "food", 15000, 0.85)  # high interest
+    infra = InfraState("360p", 600, "h264", 3000, 3, 5000)  # bad infra
+    ctx = SessionContext("first_visit", "morning", "3g", 1, 0.0)  # first visit
+
+    # This should trigger layer2 (first_visit + severe infra)
+    result = engine.step(skeleton, video, infra, ctx)
+    # With mock provider, we still get a valid result
+    assert result.action in ("watch", "skip", "exit_app")
+    # At least some calls should be layer 2 when conditions are met

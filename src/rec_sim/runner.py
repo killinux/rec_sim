@@ -8,6 +8,7 @@ from rec_sim.interaction.engine import DecisionEngine, VideoItem
 from rec_sim.interaction.infra import sample_infra_state
 from rec_sim.interaction.context import sample_session_context
 from rec_sim.fidelity.metrics import relative_error
+from rec_sim.llm.provider import LLMProvider
 
 
 @dataclass
@@ -41,10 +42,11 @@ def run_simulation(
     config: SimulationConfig,
     distributions: list[ArchetypeDistribution],
     real_data: RealDataContext | None = None,
+    llm_provider: LLMProvider | None = None,
 ) -> SimulationResult:
     rng = np.random.default_rng(config.seed)
     skeletons = generate_skeletons(distributions, config.n_agents, config.seed)
-    engine = DecisionEngine(seed=config.seed)
+    engine = DecisionEngine(seed=config.seed, llm_provider=llm_provider)
 
     # Category sampling setup
     if real_data and real_data.category_distribution:
