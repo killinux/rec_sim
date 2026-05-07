@@ -48,8 +48,16 @@ F_multidim:  0.406
   conditional_delta:    0.000  ❌ 28% avg deviation per category
 ```
 
+### Decision Log
+- **Activity fidelity**: Using normalization (方案A) instead of increasing simulation volume.
+  Reason: KuaiRec has ~3327 videos/user (fully-observed dataset), simulation has 10.
+  Comparing raw interaction counts is meaningless. Normalize to per-user behavioral
+  distributions (avg_watch_ratio, watch_ratio_std, etc.) instead of raw counts.
+  **TODO for later**: Re-run with videos_per_session=100+ to test if higher volume
+  changes the fidelity picture. This is a tunable knob, not a code fix.
+
 ### Next Steps (priority order)
-1. Fix activity normalization (videos_per_session=10 vs KuaiRec's 3327 — normalize or increase)
+1. ~~Fix activity normalization~~ → In progress (normalizing, not increasing volume)
 2. Calibration loop (3 nested loops: outer=persona rebuild, mid=param tune, inner=LLM audit)
 3. Layer 2 LLM integration (Claude API for complex decisions: first-visit, new-category, conflicts)
 4. Vine Copula extrapolation (1000 → 1 billion)

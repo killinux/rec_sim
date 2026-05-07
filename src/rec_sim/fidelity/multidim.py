@@ -101,7 +101,7 @@ def compute_multidim_fidelity(
     max_acceptable = {
         "watch_ratio_js": 0.3,
         "category_js": 0.3,
-        "activity_wasserstein": 50.0,
+        "activity_wasserstein": 0.3,  # normalized: comparing per-user avg_wr distributions (0-1 range)
         "correlation_distance": 2.0,
         "conditional_avg_delta": 0.2,
     }

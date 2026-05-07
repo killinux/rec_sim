@@ -151,14 +151,28 @@ def generate_report(
             sim_wr_by_cat.setdefault(cat_key, []).append(l["watch_pct"])
     cond_results = conditional_fidelity(real_wr_by_cat, sim_wr_by_cat)
 
-    # Activity fidelity
+    # Activity fidelity — normalized to per-user behavioral distributions
+    # NOTE: KuaiRec is fully-observed (~3327 videos/user), simulation has ~10-30.
+    # Comparing raw interaction counts is meaningless. Instead compare per-user
+    # avg_watch_ratio distributions (shape matters, not volume).
+    # TODO: Re-run with videos_per_session=100+ to test volume sensitivity.
     if real_data and len(real_data.real_interactions_per_user) > 0:
-        sim_interactions = np.array([
-            sum(1 for l in logs if l.get("agent_id") == sk_id)
-            for sk_id in set(l.get("agent_id", 0) for l in logs)
-        ], dtype=float)
-        act_fidelity = activity_distribution_fidelity(
-            real_data.real_interactions_per_user, sim_interactions)
+        # Build per-user avg watch_ratio for simulated agents
+        agent_wrs = {}
+        for l in logs:
+            if l["action"] == "watch":
+                agent_wrs.setdefault(l.get("agent_id", 0), []).append(l["watch_pct"])
+        sim_user_avg_wr = np.array([
+            float(np.mean(wrs)) for wrs in agent_wrs.values()
+        ]) if agent_wrs else np.array([0.0])
+
+        # Build per-user avg watch_ratio for real users (from archetype distributions)
+        real_user_avg_wr = np.concatenate([
+            d.sample_watch_ratios(d.n_users, seed=42)
+            for d in distributions
+        ]) if distributions else np.array([0.0])
+
+        act_fidelity = activity_distribution_fidelity(real_user_avg_wr, sim_user_avg_wr)
     else:
         act_fidelity = {"wasserstein": 0.0}
 
