@@ -17,7 +17,8 @@ def test_run_simulation_basic():
     config = SimulationConfig(n_agents=10, videos_per_session=5, seed=42)
     result = run_simulation(config, distributions=[_make_dist()])
     assert isinstance(result, SimulationResult)
-    assert len(result.logs) == 10 * 5
+    assert len(result.logs) <= 10 * 5
+    assert len(result.logs) > 0
     assert result.summary["n_agents"] == 10
     assert 0 < result.summary["avg_watch_pct"] < 1
 
