@@ -4,10 +4,14 @@ import json
 import numpy as np
 from datetime import datetime
 from pathlib import Path
-from rec_sim.runner import SimulationResult, SimulationConfig
+from rec_sim.runner import SimulationResult, SimulationConfig, RealDataContext
 from rec_sim.baseline.distribution import ArchetypeDistribution
 from rec_sim.fidelity.metrics import kl_divergence, js_divergence, wasserstein_1d, composite_fidelity
-from rec_sim.fidelity.multidim import category_distribution_fidelity, conditional_fidelity, compute_multidim_fidelity
+from rec_sim.fidelity.multidim import (
+    category_distribution_fidelity, conditional_fidelity,
+    activity_distribution_fidelity, correlation_fidelity,
+    compute_multidim_fidelity,
+)
 
 
 def generate_report(
@@ -15,6 +19,7 @@ def generate_report(
     distributions: list[ArchetypeDistribution],
     config: SimulationConfig,
     output_path: str | Path | None = None,
+    real_data: RealDataContext | None = None,
 ) -> dict:
     logs = result.logs
     watch_logs = [l for l in logs if l["action"] == "watch"]
@@ -69,11 +74,6 @@ def generate_report(
 
     network_avg = {k: float(np.mean(v)) for k, v in context_data.get("network", {}).items()}
     session_type_avg = {k: float(np.mean(v)) for k, v in context_data.get("session_type", {}).items()}
-
-    archetype_counts = {}
-    for l in logs:
-        aid = l.get("agent_id", 0)
-        archetype_counts[aid] = archetype_counts.get(aid, 0) + 1
 
     f_metrics = {
         "watch_ratio_kl": kl,
@@ -132,27 +132,63 @@ def generate_report(
         },
     }
 
-    # Build real category distribution from distributions for comparison
-    real_cat_counts = {}
-    for d in distributions:
-        real_cat_counts[str(d.archetype_id)] = d.n_users
+    # --- Multi-dimensional fidelity ---
+    # Category fidelity: compare real vs simulated category distributions
+    if real_data and real_data.real_cat_counts:
+        real_cc = {str(k): v for k, v in real_data.real_cat_counts.items()}
+    else:
+        real_cc = cat_counts  # fallback: compare with self (JS=0)
+    cat_fidelity = category_distribution_fidelity(real_cc, cat_counts)
 
-    cat_fidelity = category_distribution_fidelity(real_cat_counts, cat_counts)
-
+    # Conditional fidelity: P(watch_ratio | category)
+    real_wr_by_cat = {}
+    if real_data and real_data.real_wr_by_category:
+        real_wr_by_cat = {str(k): v for k, v in real_data.real_wr_by_category.items()}
     sim_wr_by_cat = {}
     for l in logs:
         cat_key = str(l.get("category", "unknown"))
         if l["action"] == "watch":
             sim_wr_by_cat.setdefault(cat_key, []).append(l["watch_pct"])
+    cond_results = conditional_fidelity(real_wr_by_cat, sim_wr_by_cat)
 
-    cond_results = conditional_fidelity({}, sim_wr_by_cat)
+    # Activity fidelity
+    if real_data and len(real_data.real_interactions_per_user) > 0:
+        sim_interactions = np.array([
+            sum(1 for l in logs if l.get("agent_id") == sk_id)
+            for sk_id in set(l.get("agent_id", 0) for l in logs)
+        ], dtype=float)
+        act_fidelity = activity_distribution_fidelity(
+            real_data.real_interactions_per_user, sim_interactions)
+    else:
+        act_fidelity = {"wasserstein": 0.0}
+
+    # Correlation fidelity
+    if real_data and real_data.real_user_features.size > 0:
+        # Build simulated feature matrix from logs
+        agent_features = {}
+        for l in logs:
+            aid = l.get("agent_id", 0)
+            agent_features.setdefault(aid, []).append(l.get("watch_pct", 0))
+        sim_feat_rows = []
+        for aid in sorted(agent_features.keys()):
+            wps = agent_features[aid]
+            sim_feat_rows.append([np.mean(wps), np.std(wps), len(wps)])
+        sim_features = np.array(sim_feat_rows) if sim_feat_rows else np.array([[0, 0, 0]])
+        # Use matching number of columns from real data
+        real_feat = real_data.real_user_features[:, :sim_features.shape[1]] if real_data.real_user_features.shape[1] >= sim_features.shape[1] else real_data.real_user_features
+        if real_feat.shape[1] == sim_features.shape[1]:
+            corr_result = correlation_fidelity(real_feat, sim_features)
+        else:
+            corr_result = {"normalized_distance": 0.0}
+    else:
+        corr_result = {"normalized_distance": 0.0}
 
     multidim = compute_multidim_fidelity(
         marginal_metrics={"watch_ratio_js": js},
         cat_fidelity=cat_fidelity,
         conditional_results=cond_results,
-        activity_fidelity={"wasserstein": 0.0},
-        correlation_result={"normalized_distance": 0.0},
+        activity_fidelity=act_fidelity,
+        correlation_result=corr_result,
     )
 
     report["fidelity_multidim"] = {
@@ -162,11 +198,11 @@ def generate_report(
         "category_fidelity": {
             "kl": cat_fidelity["kl"],
             "js": cat_fidelity["js"],
-            "categories": cat_fidelity["categories"],
-            "real_distribution": cat_fidelity["real_distribution"],
-            "sim_distribution": cat_fidelity["sim_distribution"],
+            "categories": cat_fidelity["categories"][:20],
+            "real_distribution": cat_fidelity["real_distribution"][:20],
+            "sim_distribution": cat_fidelity["sim_distribution"][:20],
         },
-        "conditional_wr_by_category": cond_results,
+        "conditional_wr_by_category": {k: v for k, v in list(cond_results.items())[:15]},
     }
 
     if output_path:

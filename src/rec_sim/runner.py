@@ -1,4 +1,5 @@
 """Simulation runner: N agents x M videos per session."""
+from __future__ import annotations
 from dataclasses import dataclass, field
 import numpy as np
 from rec_sim.persona.skeleton import generate_skeletons
@@ -17,27 +18,80 @@ class SimulationConfig:
 
 
 @dataclass
+class RealDataContext:
+    """Real data for realistic category sampling and interest matching."""
+    category_distribution: dict[str, float] = field(default_factory=dict)
+    archetype_interest_vectors: dict[int, np.ndarray] = field(default_factory=dict)
+    item_ids: list[int] = field(default_factory=list)
+    item_category_map: dict[int, list[int]] = field(default_factory=dict)
+    all_categories: list[int] = field(default_factory=list)
+    real_cat_counts: dict[str, int] = field(default_factory=dict)
+    real_wr_by_category: dict[str, list[float]] = field(default_factory=dict)
+    real_interactions_per_user: np.ndarray = field(default_factory=lambda: np.array([]))
+    real_user_features: np.ndarray = field(default_factory=lambda: np.array([]))
+
+
+@dataclass
 class SimulationResult:
     logs: list[dict] = field(default_factory=list)
     summary: dict = field(default_factory=dict)
 
 
-def run_simulation(config: SimulationConfig,
-                   distributions: list[ArchetypeDistribution]) -> SimulationResult:
+def run_simulation(
+    config: SimulationConfig,
+    distributions: list[ArchetypeDistribution],
+    real_data: RealDataContext | None = None,
+) -> SimulationResult:
     rng = np.random.default_rng(config.seed)
     skeletons = generate_skeletons(distributions, config.n_agents, config.seed)
     engine = DecisionEngine(seed=config.seed)
 
+    # Category sampling setup
+    if real_data and real_data.category_distribution:
+        cat_names = list(real_data.category_distribution.keys())
+        cat_probs = np.array(list(real_data.category_distribution.values()))
+        cat_probs = cat_probs / cat_probs.sum()
+        use_real_cats = True
+    else:
+        cat_names = ["food", "travel", "tech", "beauty", "comedy", "sports", "music", "education"]
+        cat_probs = np.ones(len(cat_names)) / len(cat_names)
+        use_real_cats = False
+
+    # Interest vector setup
+    use_real_interest = (
+        real_data is not None
+        and len(real_data.archetype_interest_vectors) > 0
+        and len(real_data.item_ids) > 0
+    )
+
     logs = []
-    categories = ["food", "travel", "tech", "beauty", "comedy", "sports", "music", "education"]
 
     for skeleton in skeletons:
         session_id = f"s_{skeleton.agent_id}"
         session_type = rng.choice(["first_visit", "normal", "return_user"], p=[0.1, 0.8, 0.1])
 
+        # Get this agent's interest vector
+        agent_interest_vec = None
+        if use_real_interest:
+            agent_interest_vec = real_data.archetype_interest_vectors.get(skeleton.archetype_id)
+
         for step in range(config.videos_per_session):
-            cat = rng.choice(categories)
-            interest = float(rng.beta(2, 2))
+            cat = str(rng.choice(cat_names, p=cat_probs))
+
+            # Compute interest match
+            if use_real_interest and agent_interest_vec is not None:
+                # Pick a random real item and compute cosine similarity
+                item_id = int(rng.choice(real_data.item_ids))
+                from rec_sim.baseline.interest import build_item_vector, compute_interest_match
+                item_vec = build_item_vector(item_id, real_data.item_category_map, real_data.all_categories)
+                interest = compute_interest_match(agent_interest_vec, item_vec)
+                # Use the item's actual category instead of the sampled one
+                item_cats = real_data.item_category_map.get(item_id, [])
+                if item_cats:
+                    cat = str(item_cats[0])
+            else:
+                interest = float(rng.beta(2, 2))
+
             video = VideoItem(
                 video_id=f"v_{rng.integers(0, 100000)}",
                 category=cat,
