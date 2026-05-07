@@ -1,4 +1,5 @@
 """Extract user features and cluster into archetypes."""
+from __future__ import annotations
 import numpy as np
 import pandas as pd
 from sklearn.preprocessing import StandardScaler
