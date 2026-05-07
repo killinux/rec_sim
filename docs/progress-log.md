@@ -389,22 +389,74 @@ L0 通过 → L1 计算 → "watch"/"skip"
 | P0 多维 | 0.602 | 0.669 | 加了多维度量，品类 JS=0.693 暴露 |
 | P1 品类修复 | 0.440 | 0.406 | 品类 JS 0.693→0.050，但活跃度暴露 |
 | P1 归一化 | 0.440 | 0.489 | 活跃度 0→0.415，category 0.835 |
+| MVP Pipeline | 0.468 | 0.497 | DeepSeek LLM 159/988 calls (16.1%) |
 
-### Known Issues (MVP 后回来改)
-- conditional_delta = 0.278 (各品类完播率偏差 28%) → 校准环可修
-- watch_ratio_js = 0.184 (完播率分布形状) → 校准环可修
+---
+
+## MVP Pipeline 完整结果 (2026-05-07)
+
+### Step 4: 模拟 (DeepSeek LLM)
+```
+988 decisions in 258.8s
+Layer 2 (LLM) decisions: 159/988 (16.1%)
+F_overall:  0.468
+F_multidim: 0.497
+  watch_ratio_js:       0.457
+  category_js:          0.835
+  activity_wasserstein: 0.389
+  correlation_distance: 0.805
+  conditional_avg_delta:0.000
+```
+
+### Step 5: 校准环
+```
+10 iterations, F: 0.489 → 0.427 (未收敛，lr=0.15 过于激进)
+→ 已调优为 lr=0.05, regularization=4.0，等待重跑
+```
+
+### Step 6: 外推到 10 亿
+```
+5000 representatives, GMM 10 components
+  Heavy (WR>70%):   739,490,552 users (73.9%)
+  Medium (30-70%):  240,509,447 users (24.1%)
+  Light (WR<30%):    20,000,000 users (2.0%)
+Quality: JS=0.040, subsample_delta=0.003 (外推质量非常好)
+```
+
+### Step 7: A/B Test (10 vs 30 videos/session)
+```
+Winner: 10_videos (shorter sessions)
+  avg_watch_pct: 74.6% → 67.0% (-10.2%)
+  skip_rate: 9.1% → 11.7% (+28.3%)
+  exit_rate: 0.2% → 0.3% (+40.4%)
+  p < 0.0001, Cohen's d = -0.45 (medium effect)
+结论: 更长的会话导致用户疲劳，完播率和互动率均下降
+```
+
+### DeepSeek 实际成本
+- 159 次 LLM 调用，total_tokens ≈ 50K
+- 估算费用: ¥0.05-0.10（极其便宜）
+
+---
+
+## Known Issues (后续优化)
+- 校准环 lr=0.15 导致 F 下降 → 已调到 0.05，待验证
+- conditional_delta = 0.278 (各品类完播率偏差 28%)
+- watch_ratio_js = 0.184 (完播率分布形状)
 - videos_per_session=10 → 可增大到 100+ 重测
+- GMM 外推可升级为 Vine Copula
 
-## 下一步计划
+## 任务完成状态
 
 | 状态 | 任务 | 说明 |
 |------|------|------|
 | ✅ | 品类分布修复 | runner 用真实品类分布 |
-| ✅ | 活跃度归一化 | 比较 per-user avg_wr 而非原始交互数 |
+| ✅ | 活跃度归一化 | 比较 per-user avg_wr |
 | ✅ | 校准环 | 外循环+中循环，自动调 Beta 参数 |
-| ✅ | Layer 2 LLM 集成 | Provider 抽象 + DeepSeek/Mock |
-| ⬜ | Vine Copula 外推 | 1000 → 10 亿统计放大 |
-| ⬜ | 评估层 | A/B test 框架，算法对比 |
+| ✅ | Layer 2 LLM 集成 | DeepSeek/OpenAI/Mock provider |
+| ✅ | GMM 外推 | 1000→10亿，5000 representatives |
+| ✅ | 评估层 | A/B test + 统计显著性 |
+| ✅ | 完整 Pipeline | scripts/run_full_pipeline.py |
 
 ---
 
@@ -428,6 +480,15 @@ cp src/rec_sim/dashboard.html reports/
 
 # 浏览器访问
 http://localhost/research/rec_sim/reports/dashboard.html
+```
+
+### 跑完整 Pipeline
+```bash
+cd /Users/bytedance/Desktop/hehe/research/rec_sim
+export PYTHONPATH="$PWD/src"
+export LLM_API_KEY="your-deepseek-key"
+python3 scripts/run_full_pipeline.py
+# 输出 3 个报告到 reports/
 ```
 
 ### 推送代码
