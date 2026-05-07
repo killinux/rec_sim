@@ -61,14 +61,21 @@ F_multidim:  0.489
 - **watch_ratio_js = 0.184**: 完播率分布形状差距，需要校准环修正
 - **activity volume**: 当前 videos_per_session=10，可增大到 100+ 重测
 
-### Next Steps — MVP First, Then Iterate
-1. ~~Fix activity normalization~~ → Done (normalized to per-user avg_wr)
-2. **Calibration loop** — 三嵌套循环: outer=persona rebuild, mid=param tune, inner=LLM audit
-3. **Layer 2 LLM integration** — Claude API for complex decisions (first-visit, new-category, conflicts)
-4. **Vine Copula extrapolation** — 1000 → 1 billion
-5. **Evaluation layer** — A/B test framework, algorithm comparison
+### MVP Completion Status
+1. ~~Fix activity normalization~~ → Done
+2. ~~Calibration loop~~ → Done (outer + mid loops, auto Beta param adjustment)
+3. ~~Layer 2 LLM integration~~ → Done (DeepSeek/OpenAI/Mock providers, wired into engine)
+4. ~~Extrapolation~~ → Done (GMM-based, 1000→1B with weighted representatives)
+5. ~~Evaluation layer~~ → Done (A/B test with Mann-Whitney U, Welch's t, Cohen's d)
+6. ~~Full pipeline script~~ → Done (scripts/run_full_pipeline.py, runs all 7 steps)
 
-Goal: run through steps 2→3→4→5 as MVP first, then revisit known issues.
+### Post-MVP Improvements
+- Increase videos_per_session for higher fidelity
+- Vine Copula (replace GMM) for better joint distribution modeling
+- Support Points + Column Generation for persona optimization
+- LLM inner loop in calibration (audit Layer 1 decisions)
+- Persona narrative generation (LLM-driven natural language profiles)
+- Dashboard historical comparison (multiple reports over time)
 
 ## Key Documentation
 
@@ -83,9 +90,9 @@ Goal: run through steps 2→3→4→5 as MVP first, then revisit known issues.
 ```
 src/rec_sim/
 ├── config.py              # paths, constants
-├── runner.py              # simulation main loop (accepts RealDataContext)
+├── runner.py              # simulation main loop (RealDataContext + LLMProvider)
 ├── report.py              # JSON report generator + multidim fidelity
-├── dashboard.html         # H5 visualization (Chart.js)
+├── dashboard.html         # H5 visualization (Chart.js, auto-loads JSON)
 ├── baseline/
 │   ├── loader.py          # KuaiRec data loading
 │   ├── clustering.py      # KMeans user clustering
@@ -93,19 +100,46 @@ src/rec_sim/
 │   └── interest.py        # interest vectors + cosine matching
 ├── fidelity/
 │   ├── metrics.py         # KL, JS, Wasserstein, composite F
-│   └── multidim.py        # 5-dim fidelity (category, conditional, activity, correlation)
+│   └── multidim.py        # 5-dim fidelity
 ├── persona/
 │   └── skeleton.py        # LHS-based persona generation
-└── interaction/
-    ├── infra.py           # network/quality/stall state model
-    ├── context.py         # session context (time, fatigue)
-    ├── layer0.py          # experience decision (stall/quality → skip/exit)
-    ├── layer1.py          # content decision (interest match → watch_pct)
-    └── engine.py          # L0+L1 orchestration
+├── interaction/
+│   ├── infra.py           # network/quality/stall state model
+│   ├── context.py         # session context (time, fatigue)
+│   ├── layer0.py          # experience decision
+│   ├── layer1.py          # content decision
+│   ├── layer2.py          # LLM emergent decision (DeepSeek/OpenAI/Mock)
+│   └── engine.py          # L0+L1+L2 orchestration
+├── llm/
+│   └── provider.py        # LLM abstraction (Mock/DeepSeek/OpenAI/Ollama)
+├── calibration/
+│   └── loop.py            # calibration loop (outer + mid iterations)
+├── extrapolation/
+│   └── scaler.py          # GMM-based 1000→1B scaling
+└── evaluation/
+    └── abtest.py          # A/B test with statistical significance
+
+scripts/
+└── run_full_pipeline.py   # runs all 7 steps end-to-end
 ```
 
 ## Tech
 
 - Python 3.9+ (Mac has 3.9.6, use `from __future__ import annotations`)
 - pandas, numpy, scipy, scikit-learn, pytest
-- No LLM dependencies yet (Phase 1 is pure math)
+- LLM: DeepSeek API (OpenAI-compatible), key via `LLM_API_KEY` env var
+- 85 tests, 16 test files, 25 Python modules
+
+## Running the Full Pipeline
+
+```bash
+cd /Users/bytedance/Desktop/hehe/research/rec_sim
+export PYTHONPATH="$PWD/src"
+export LLM_API_KEY="your-deepseek-key"
+python3 scripts/run_full_pipeline.py
+```
+
+Outputs 3 reports to `reports/`:
+- latest_report.json (simulation + multidim fidelity)
+- traffic_report_1B.json (1B user extrapolation)
+- abtest_result.json (statistical A/B comparison)
