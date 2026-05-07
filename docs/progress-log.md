@@ -171,25 +171,30 @@ rec_sim/
 │   └── dashboard.html                                 # H5 可视化面板
 ├── src/rec_sim/
 │   ├── config.py                                      # 路径和常量
-│   ├── runner.py                                      # 仿真主循环
-│   ├── report.py                                      # 报告生成器
-│   ├── dashboard.html                                 # H5 源文件
+│   ├── runner.py                                      # 仿真主循环 (accepts RealDataContext)
+│   ├── report.py                                      # 报告生成器 + 多维保真度
+│   ├── dashboard.html                                 # H5 可视化面板
 │   ├── baseline/
 │   │   ├── loader.py                                  # KuaiRec 数据加载
 │   │   ├── clustering.py                              # 用户聚类
 │   │   ├── distribution.py                            # 分布提取 (Beta/LogNormal)
-│   │   └── interest.py                                # 兴趣向量构建
+│   │   └── interest.py                                # 兴趣向量 + 余弦匹配
 │   ├── fidelity/
 │   │   ├── metrics.py                                 # 基础指标 (KL/JS/Wass/F)
-│   │   └── multidim.py                                # 多维保真度
+│   │   └── multidim.py                                # 多维保真度 (5维)
 │   ├── persona/
 │   │   └── skeleton.py                                # LHS 骨架生成
-│   └── interaction/
-│       ├── infra.py                                   # 基础设施状态模型
-│       ├── context.py                                 # 会话上下文模型
-│       ├── layer0.py                                  # Layer 0 体验决策
-│       ├── layer1.py                                  # Layer 1 内容决策
-│       └── engine.py                                  # 决策引擎 (L0+L1 编排)
+│   ├── interaction/
+│   │   ├── infra.py                                   # 基础设施状态模型
+│   │   ├── context.py                                 # 会话上下文模型
+│   │   ├── layer0.py                                  # Layer 0 体验决策
+│   │   ├── layer1.py                                  # Layer 1 内容决策
+│   │   ├── layer2.py                                  # Layer 2 LLM 涌现决策
+│   │   └── engine.py                                  # 决策引擎 (L0+L1+L2 编排)
+│   ├── llm/
+│   │   └── provider.py                                # LLM 抽象接口 (Mock/DeepSeek/OpenAI/Ollama)
+│   └── calibration/
+│       └── loop.py                                    # 校准环 (外循环+中循环)
 ├── tests/
 │   ├── test_loader.py          (3 tests)
 │   ├── test_clustering.py      (3 tests)
@@ -199,15 +204,107 @@ rec_sim/
 │   ├── test_infra.py           (4 tests)
 │   ├── test_layer0.py          (4 tests)
 │   ├── test_layer1.py          (4 tests)
+│   ├── test_layer2.py          (12 tests)
 │   ├── test_engine.py          (3 tests)
 │   ├── test_runner.py          (3 tests)
 │   ├── test_interest.py        (6 tests)
 │   ├── test_multidim.py        (6 tests)
+│   ├── test_provider.py        (5 tests)
+│   ├── test_calibration.py     (4 tests)
 │   └── test_e2e.py             (1 test, 需要 KuaiRec 真实数据)
 └── pyproject.toml
 ```
 
-**总计:** 17 个 Python 模块 + 13 个测试文件 (53 test cases)
+**总计:** 22 个 Python 模块 + 16 个测试文件 (73 test cases)
+
+---
+
+## 校准环 — 已完成
+
+### 原理
+
+模拟跑完后，保真度 F 不达标（比如各品类完播率偏差 28%）。偏差不是代码 bug，而是参数经过 LHS 采样 + L0 打折 + L1 噪声后偏移了。校准环自动找偏差 → 调参 → 重跑 → 检查，迭代收敛。
+
+### 两层循环
+
+- **外循环**（最多 3 轮）：检查整体 F_multidim，偏差太大则标记需重建 persona
+- **中循环**（最多 10 轮）：找最差维度 → 调 Beta 分布参数 → 重跑模拟 → 检查改善
+- 内循环（LLM 抽检）：留给 Layer 2 实现
+
+### 调参方式
+
+```
+目标: 品类8的完播率偏低 0.17
+→ 对相关 archetype 的 Beta(a, b) 做调整:
+  Beta 均值 = a/(a+b)
+  new_mean = old_mean + lr * delta
+  正则化: max_shift = old_mean / regularization_factor
+  防止单次调太远导致震荡
+```
+
+### 测试
+
+4 个测试全通过：基本运行、多轮迭代稳定性、历史记录结构、收敛条件。
+
+---
+
+## Layer 2 LLM 集成 — 已完成
+
+### 架构
+
+抽象 provider 接口，支持多种 LLM 后端：
+
+```
+LLMProvider (抽象基类)
+├── MockProvider         — 测试用，关键词匹配，不调 API
+├── OpenAICompatibleProvider — 统一接口
+│   ├── DeepSeek        — base_url=api.deepseek.com (已测通)
+│   ├── OpenAI          — base_url=api.openai.com
+│   └── Ollama          — base_url=localhost:11434 (本地)
+```
+
+通过工厂函数切换：`create_provider("deepseek", api_key=...)` 或 `create_provider("mock")`
+
+API key 通过环境变量 `LLM_API_KEY` 传入，不硬编码。
+
+### Layer 2 触发条件
+
+不是每个决策都走 LLM（太贵），只有 ~20% 的复杂场景触发：
+
+| 条件 | 触发原因 |
+|------|---------|
+| 首刷前 N 个视频 | 留存关键路径 |
+| L0 factor < 0.5 | 严重基础设施降级 |
+| 兴趣 > 0.7 且 L0 < 0.7 | 内容好但体验差的冲突 |
+| 随机 10% | 校准抽检 |
+
+### Prompt 结构
+
+```
+USER PROFILE: 完播倾向、卡顿容忍、画质敏感度
+CURRENT SITUATION: 首刷/普通、第几个视频、时段、网络、疲劳
+VIDEO: 品类、兴趣匹配度、画质、首帧延迟、卡顿
+→ 输出: {"watch_pct", "liked", "commented", "shared", "reason"}
+```
+
+### 成本估算
+
+| 场景 | LLM 调用 | DeepSeek 费用 |
+|------|---------|--------------|
+| 单次 E2E (100 agents × 10 videos × 20%) | ~200 次 | ~¥0.1 |
+| 校准环 (5 轮 × 200) | ~1000 次 | ~¥0.5 |
+| 正式跑 (1000 × 30 × 20%) | ~6000 次 | ~¥3 |
+
+### JSON 解析容错
+
+LLM 返回可能不规范（markdown code block、不完整 JSON 等），provider 内置了多层 fallback：
+1. 尝试直接 json.loads
+2. 从 markdown ``` 块中提取
+3. 失败返回默认值 + parse_error 标记
+
+### 测试
+
+16 个测试全部通过：provider 行为、触发条件、prompt 内容、Mock 决策、JSON 解析容错。
 
 ---
 
@@ -284,21 +381,30 @@ L0 通过 → L1 计算 → "watch"/"skip"
 
 ---
 
-## 下一步计划 (按优先级)
+## 保真度演进记录
 
-| 优先级 | 任务 | 说明 | 预计工作量 |
-|--------|------|------|-----------|
-| P1 | 修复品类分布 | runner 里用真实品类分布替代 rng.choice | 小 |
-| P1 | 接入真实活跃度 + 相关性数据 | multidim 里的占位值替换为真实计算 | 小 |
-| P1 | 校准环 | 三嵌套循环: 发现偏差 → 自动修正 → 重新验证 | 中 |
-| P1 | Layer 2 LLM 集成 | Claude API 处理首刷/复杂决策 | 中 |
-| P2 | Vine Copula 外推 | 1000 → 10 亿统计放大 | 大 |
-| P2 | 评估看板增强 | 历史对比、多次实验趋势、A/B test | 中 |
-| P2 | MIND 数据集 | 换下载方式 (Kaggle/Windows 中转) | 小 |
+| 阶段 | F_overall | F_multidim | 关键变化 |
+|------|-----------|-----------|---------|
+| Phase 1 | 0.983 | - | 只看均值，虚高 |
+| P0 多维 | 0.602 | 0.669 | 加了多维度量，品类 JS=0.693 暴露 |
+| P1 品类修复 | 0.440 | 0.406 | 品类 JS 0.693→0.050，但活跃度暴露 |
+| P1 归一化 | 0.440 | 0.489 | 活跃度 0→0.415，category 0.835 |
 
-### 当前最紧迫的问题
+### Known Issues (MVP 后回来改)
+- conditional_delta = 0.278 (各品类完播率偏差 28%) → 校准环可修
+- watch_ratio_js = 0.184 (完播率分布形状) → 校准环可修
+- videos_per_session=10 → 可增大到 100+ 重测
 
-**品类分布 JS=0.693** — runner.py 里 `rng.choice(categories)` 是均匀随机，不是从 KuaiRec 真实品类分布采样。修复后 category_js 应该大幅下降，F_multidim 会明显提升。
+## 下一步计划
+
+| 状态 | 任务 | 说明 |
+|------|------|------|
+| ✅ | 品类分布修复 | runner 用真实品类分布 |
+| ✅ | 活跃度归一化 | 比较 per-user avg_wr 而非原始交互数 |
+| ✅ | 校准环 | 外循环+中循环，自动调 Beta 参数 |
+| ✅ | Layer 2 LLM 集成 | Provider 抽象 + DeepSeek/Mock |
+| ⬜ | Vine Copula 外推 | 1000 → 10 亿统计放大 |
+| ⬜ | 评估层 | A/B test 框架，算法对比 |
 
 ---
 
