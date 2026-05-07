@@ -134,9 +134,10 @@ def run_pipeline():
     t0 = time.time()
     cal_config = CalibrationConfig(
         max_outer_iterations=2,
-        max_mid_iterations=5,
-        f_multidim_target=0.7,
-        learning_rate=0.15,
+        max_mid_iterations=8,
+        f_multidim_target=0.6,
+        learning_rate=0.05,
+        regularization=4.0,
     )
     cal_result = calibrate(
         dists, config, real_data, cal_config,
