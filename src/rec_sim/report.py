@@ -7,6 +7,7 @@ from pathlib import Path
 from rec_sim.runner import SimulationResult, SimulationConfig
 from rec_sim.baseline.distribution import ArchetypeDistribution
 from rec_sim.fidelity.metrics import kl_divergence, js_divergence, wasserstein_1d, composite_fidelity
+from rec_sim.fidelity.multidim import category_distribution_fidelity, conditional_fidelity, compute_multidim_fidelity
 
 
 def generate_report(
@@ -129,6 +130,43 @@ def generate_report(
             "archetype_proportions": {str(d.archetype_id): d.proportion for d in distributions},
             "archetype_wr_means": {str(d.archetype_id): d.watch_ratio_mean for d in distributions},
         },
+    }
+
+    # Build real category distribution from distributions for comparison
+    real_cat_counts = {}
+    for d in distributions:
+        real_cat_counts[str(d.archetype_id)] = d.n_users
+
+    cat_fidelity = category_distribution_fidelity(real_cat_counts, cat_counts)
+
+    sim_wr_by_cat = {}
+    for l in logs:
+        cat_key = str(l.get("category", "unknown"))
+        if l["action"] == "watch":
+            sim_wr_by_cat.setdefault(cat_key, []).append(l["watch_pct"])
+
+    cond_results = conditional_fidelity({}, sim_wr_by_cat)
+
+    multidim = compute_multidim_fidelity(
+        marginal_metrics={"watch_ratio_js": js},
+        cat_fidelity=cat_fidelity,
+        conditional_results=cond_results,
+        activity_fidelity={"wasserstein": 0.0},
+        correlation_result={"normalized_distance": 0.0},
+    )
+
+    report["fidelity_multidim"] = {
+        "F_multidim": multidim["F_multidim"],
+        "per_dimension": multidim["per_dimension"],
+        "raw_metrics": multidim["raw_metrics"],
+        "category_fidelity": {
+            "kl": cat_fidelity["kl"],
+            "js": cat_fidelity["js"],
+            "categories": cat_fidelity["categories"],
+            "real_distribution": cat_fidelity["real_distribution"],
+            "sim_distribution": cat_fidelity["sim_distribution"],
+        },
+        "conditional_wr_by_category": cond_results,
     }
 
     if output_path:
