@@ -22,8 +22,8 @@ def content_decision(skeleton: PersonaSkeleton, interest_match: float,
     snap_roll = rng.random()
     if interest_match > 0.65 and snap_roll < 0.3:
         raw_pct = rng.uniform(0.85, 1.0)
-    elif interest_match < 0.35 and snap_roll < 0.4:
-        raw_pct = rng.uniform(0.0, 0.10)
+    elif interest_match < 0.25 and snap_roll < 0.2:
+        raw_pct = rng.uniform(0.0, 0.12)
     else:
         interest_boost = (interest_match - 0.5) * 0.7
         fatigue_penalty = fatigue * 0.3
