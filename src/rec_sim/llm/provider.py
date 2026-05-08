@@ -153,6 +153,55 @@ class OpenAICompatibleProvider(LLMProvider):
             )
 
 
+class ClaudeProvider(LLMProvider):
+    """Provider for Anthropic Claude API (non-OpenAI format)."""
+
+    def __init__(
+        self,
+        api_key: str | None = None,
+        model: str = "claude-sonnet-4-6",
+        max_tokens: int = 150,
+    ):
+        self.api_key = api_key or os.environ.get("ANTHROPIC_API_KEY", "")
+        self.model = model
+        self.max_tokens = max_tokens
+        if not self.api_key:
+            raise ValueError("Anthropic API key required. Set ANTHROPIC_API_KEY env var or pass api_key.")
+
+    def decide(self, prompt: str) -> LLMResponse:
+        import urllib.request
+        import urllib.error
+
+        url = "https://api.anthropic.com/v1/messages"
+        payload = json.dumps({
+            "model": self.model,
+            "max_tokens": self.max_tokens,
+            "messages": [
+                {"role": "user", "content": f"You are a user behavior simulator. Always respond with valid JSON only, no markdown.\n\n{prompt}"},
+            ],
+        }).encode("utf-8")
+
+        req = urllib.request.Request(
+            url, data=payload,
+            headers={
+                "Content-Type": "application/json",
+                "x-api-key": self.api_key,
+                "anthropic-version": "2023-06-01",
+            },
+        )
+
+        try:
+            with urllib.request.urlopen(req, timeout=30) as resp:
+                result = json.loads(resp.read().decode("utf-8"))
+                text = result["content"][0]["text"]
+                return self._parse_response(text)
+        except (urllib.error.URLError, urllib.error.HTTPError, KeyError, json.JSONDecodeError) as e:
+            return LLMResponse(
+                watch_pct=0.5, liked=False, commented=False, shared=False,
+                reason=f"claude_api_error: {str(e)[:100]}", raw_response=str(e),
+            )
+
+
 def create_provider(provider_type: str = "mock", **kwargs) -> LLMProvider:
     """Factory function to create LLM providers.
 
@@ -180,6 +229,11 @@ def create_provider(provider_type: str = "mock", **kwargs) -> LLMProvider:
             model=kwargs.get("model", "qwen2.5"),
             api_key=kwargs.get("api_key", "ollama"),
             **{k: v for k, v in kwargs.items() if k not in ("base_url", "model", "api_key")},
+        )
+    elif provider_type == "claude":
+        return ClaudeProvider(
+            model=kwargs.get("model", "claude-sonnet-4-6"),
+            api_key=kwargs.get("api_key"),
         )
     elif provider_type == "custom":
         return OpenAICompatibleProvider(**kwargs)

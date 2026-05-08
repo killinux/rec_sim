@@ -98,13 +98,19 @@ def run_pipeline():
     print("=" * 60)
 
     import os
+    llm_type = os.environ.get("LLM_PROVIDER", "deepseek")
     api_key = os.environ.get("LLM_API_KEY", "")
-    if api_key:
-        llm_provider = create_provider("deepseek", api_key=api_key)
-        print("  Using DeepSeek LLM for Layer 2 decisions")
+    anthropic_key = os.environ.get("ANTHROPIC_API_KEY", "")
+
+    if llm_type == "claude" and anthropic_key:
+        llm_provider = create_provider("claude", api_key=anthropic_key)
+        print("  Using Claude for Layer 2 decisions")
+    elif api_key:
+        llm_provider = create_provider(llm_type, api_key=api_key)
+        print(f"  Using {llm_type} LLM for Layer 2 decisions")
     else:
         llm_provider = create_provider("mock")
-        print("  No LLM_API_KEY found, using MockProvider")
+        print("  No API key found, using MockProvider")
 
     config = SimulationConfig(n_agents=100, videos_per_session=10, seed=42)
     t0 = time.time()
