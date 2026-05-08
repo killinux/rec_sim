@@ -327,7 +327,26 @@ agent_interest_vec[其他品类] += boost   # 好奇心
 
 ### E2E F_multidim 结果
 
-_(R7 命令已发送到 Mac — R6 只含兴趣漂移+校准，R7 追加速决+activity修复)_
+```
+F_multidim = 0.457 ← 下降（从 R5 0.467）
+
+watch_ratio_js:       0.200   raw=0.240   ← 恶化!
+category_js:          0.840   raw=0.048   (稳定)
+activity_wasserstein: 0.000   raw>0.3     ← 仍然崩（无 fix）
+correlation:          0.714   raw=0.572   (持平)
+conditional_rank_dist:0.604   raw=0.594   (持平)
+```
+
+**注意:** 此轮 git pull 包含了速决机制但未包含 activity 均值中心化修复。
+
+### 诊断
+
+**速决机制过于激进：**
+- skip_rate 从 17.8% → 30.9%（翻倍!）
+- avg_WR 从 0.57 → 0.49
+- instant-skip 概率 40%（interest<0.35）太高
+
+**修正:** 降低 skip 概率 40%→20%，收窄阈值 0.35→0.25（只有真正不感兴趣的才秒划）
 
 ---
 
@@ -341,5 +360,6 @@ _(R7 命令已发送到 Mac — R6 只含兴趣漂移+校准，R7 追加速决+a
 | R3 | 0.532 → | wr_js=0.363, activity=0.226 | conditional 降权 + interest 分化 | conditional 微改善，其他不变 |
 | R4 | 0.562 ↑ | activity=0.228, wr_js=0.404 | DeepSeek full pipeline | conditional 大幅改善 |
 | R5 | 0.467 ↓ | activity=0.000, wr_js=0.230 | videos_per_session 10→50 | conditional↑, 但 activity 崩了 |
-| R6 | _(待填)_ | _(待填)_ | 兴趣漂移 + per-arch校准 | _(待填)_ |
-| R7 | _(待填)_ | _(待填)_ | +速决 + activity均值中心化 | _(待填)_ |
+| R6 | 0.457 ↓ | wr_js=0.200, activity=0.000 | 兴趣漂移+per-arch校准+速决(过激) | 速决导致skip翻倍 |
+| R7 | _(待填)_ | _(待填)_ | +activity均值中心化 | _(待填)_ |
+| R8 | _(待填)_ | _(待填)_ | 速决调优(skip 40%→20%) | _(待填)_ |
