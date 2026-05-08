@@ -72,10 +72,12 @@ def run_simulation(
         session_id = f"s_{skeleton.agent_id}"
         session_type = rng.choice(["first_visit", "normal", "return_user"], p=[0.1, 0.8, 0.1])
 
-        # Get this agent's interest vector
+        # Get this agent's interest vector (copy for per-session drift)
         agent_interest_vec = None
         if use_real_interest:
-            agent_interest_vec = real_data.archetype_interest_vectors.get(skeleton.archetype_id)
+            base_vec = real_data.archetype_interest_vectors.get(skeleton.archetype_id)
+            if base_vec is not None:
+                agent_interest_vec = base_vec.copy()
 
         for step in range(config.videos_per_session):
             cat = str(rng.choice(cat_names, p=cat_probs))
@@ -109,9 +111,28 @@ def run_simulation(
             log["step_index"] = step
             log["video_id"] = video.video_id
             log["category"] = cat
+            log["archetype_id"] = skeleton.archetype_id
             log["context"] = {"session_type": session_type, "time_slot": ctx.time_slot,
                               "network": ctx.network, "fatigue": ctx.fatigue}
             logs.append(log)
+
+            # Interest drift: decay watched category, boost others
+            if (result.action == "watch" and agent_interest_vec is not None
+                    and use_real_interest):
+                cat_index = {c: i for i, c in enumerate(real_data.all_categories)}
+                watched_cat = int(cat) if cat.isdigit() else None
+                if watched_cat is not None and watched_cat in cat_index:
+                    idx = cat_index[watched_cat]
+                    decay = 0.05
+                    boost = decay / max(len(agent_interest_vec) - 1, 1)
+                    agent_interest_vec[idx] *= (1.0 - decay)
+                    for j in range(len(agent_interest_vec)):
+                        if j != idx:
+                            agent_interest_vec[j] += boost
+                    total = agent_interest_vec.sum()
+                    if total > 0:
+                        agent_interest_vec /= total
+
             if result.action == "exit_app":
                 break
 

@@ -108,10 +108,10 @@ def calibrate(
                     final_report=report,
                 )
 
-            # Find worst dimensions and adjust
+            # Find worst dimensions and adjust (per-archetype)
             adjustments = _compute_adjustments(
                 current_dists, per_dim, raw_metrics, report,
-                cal_config, real_data,
+                cal_config, real_data, sim_result=result,
             )
             step_record["adjustments"] = adjustments
             step_record["status"] = "adjusting"
@@ -152,45 +152,37 @@ def calibrate(
 
 def _compute_adjustments(
     distributions, per_dim, raw_metrics, report, cal_config, real_data,
+    sim_result: SimulationResult | None = None,
 ) -> list[dict]:
-    """Determine what parameters to adjust based on fidelity gaps."""
+    """Determine per-archetype adjustments based on fidelity gaps."""
     adjustments = []
 
-    # 1. Watch ratio distribution gap → adjust Beta parameters
-    wr_score = per_dim.get("watch_ratio_js", 1.0)
-    if wr_score < cal_config.per_dim_targets.get("watch_ratio_js", 0.5):
-        # Compare target vs actual avg watch ratio
-        fidelity = report.get("fidelity", {})
-        target_wr = fidelity.get("target_avg_wr", 0.5)
-        actual_wr = fidelity.get("actual_avg_wr", 0.5)
-        delta = target_wr - actual_wr
+    # Per-archetype watch ratio analysis
+    if sim_result and sim_result.logs:
+        arch_sim_wr = {}
+        for log in sim_result.logs:
+            aid = log.get("archetype_id")
+            if aid is not None and log.get("action") == "watch":
+                arch_sim_wr.setdefault(aid, []).append(log["watch_pct"])
 
-        if abs(delta) > 0.01:
-            adjustments.append({
-                "type": "watch_ratio_shift",
-                "delta": delta,
-                "reason": f"avg WR gap: target={target_wr:.3f} actual={actual_wr:.3f}",
-            })
+        dist_map = {d.archetype_id: d for d in distributions}
 
-    # 2. Conditional rank distance → adjust if rank correlation is poor
-    cond_score = per_dim.get("conditional_rank_dist", 1.0)
-    if cond_score < cal_config.per_dim_targets.get("conditional_rank_dist", 0.5):
-        cond_data = report.get("fidelity_multidim", {}).get("conditional_wr_by_category", {})
-        for cat, vals in cond_data.items():
-            if cat.startswith("_"):
+        for aid, wrs in arch_sim_wr.items():
+            d = dist_map.get(aid)
+            if d is None:
                 continue
-            if not isinstance(vals, dict):
-                continue
-            cat_delta = vals.get("real_mean", 0.5) - vals.get("sim_mean", 0.5)
-            if abs(cat_delta) > 0.05:
+            sim_mean = float(np.mean(wrs))
+            target_mean = d.watch_ratio_mean
+            delta = target_mean - sim_mean
+            if abs(delta) > 0.02:
                 adjustments.append({
-                    "type": "conditional_wr_shift",
-                    "category": cat,
-                    "delta": cat_delta,
-                    "reason": f"cat {cat}: real={vals.get('real_mean',0):.3f} sim={vals.get('sim_mean',0):.3f}",
+                    "type": "per_archetype_wr_shift",
+                    "archetype_id": aid,
+                    "delta": delta,
+                    "reason": f"arch {aid}: target={target_mean:.3f} sim={sim_mean:.3f}",
                 })
 
-    # 3. Watch ratio JS high → adjust Beta variance (a+b controls concentration)
+    # Watch ratio JS high → per-archetype variance adjustment
     wr_js_raw = raw_metrics.get("watch_ratio_js", 0)
     if wr_js_raw > 0.15:
         adjustments.append({
@@ -207,52 +199,34 @@ def _apply_adjustments(
     adjustments: list[dict],
     cal_config: CalibrationConfig,
 ) -> list[ArchetypeDistribution]:
-    """Apply parameter adjustments to distributions with regularization."""
+    """Apply per-archetype parameter adjustments with regularization."""
     new_dists = [copy.deepcopy(d) for d in distributions]
     lr = cal_config.learning_rate
     reg = cal_config.regularization
+    dist_map = {d.archetype_id: d for d in new_dists}
 
     for adj in adjustments:
-        if adj["type"] == "watch_ratio_shift":
+        if adj["type"] == "per_archetype_wr_shift":
+            aid = adj["archetype_id"]
+            d = dist_map.get(aid)
+            if d is None:
+                continue
             delta = adj["delta"]
-            for d in new_dists:
-                # Shift Beta distribution mean by adjusting a parameter
-                # Beta mean = a / (a + b), increase a to increase mean
-                original_mean = d.watch_ratio_beta_a / (d.watch_ratio_beta_a + d.watch_ratio_beta_b)
-                target_shift = lr * delta
-
-                # Regularization: don't shift too far from original
-                max_shift = original_mean / reg
-                clamped_shift = max(min(target_shift, max_shift), -max_shift)
-
-                # Adjust a to shift the mean
-                total = d.watch_ratio_beta_a + d.watch_ratio_beta_b
-                new_mean = np.clip(original_mean + clamped_shift, 0.05, 0.95)
-                d.watch_ratio_beta_a = float(new_mean * total)
-                d.watch_ratio_beta_b = float((1 - new_mean) * total)
-                d.watch_ratio_mean = float(new_mean)
-
-        elif adj["type"] == "conditional_wr_shift":
-            delta = adj["delta"]
-            for d in new_dists:
-                shift = lr * delta * 0.3
-                original_mean = d.watch_ratio_beta_a / (d.watch_ratio_beta_a + d.watch_ratio_beta_b)
-                max_shift = original_mean / reg
-                clamped_shift = max(min(shift, max_shift), -max_shift)
-                total = d.watch_ratio_beta_a + d.watch_ratio_beta_b
-                new_mean = np.clip(original_mean + clamped_shift, 0.05, 0.95)
-                d.watch_ratio_beta_a = float(new_mean * total)
-                d.watch_ratio_beta_b = float((1 - new_mean) * total)
-                d.watch_ratio_mean = float(new_mean)
+            original_mean = d.watch_ratio_beta_a / (d.watch_ratio_beta_a + d.watch_ratio_beta_b)
+            target_shift = lr * delta
+            max_shift = original_mean / reg
+            clamped_shift = max(min(target_shift, max_shift), -max_shift)
+            total = d.watch_ratio_beta_a + d.watch_ratio_beta_b
+            new_mean = np.clip(original_mean + clamped_shift, 0.05, 0.95)
+            d.watch_ratio_beta_a = float(new_mean * total)
+            d.watch_ratio_beta_b = float((1 - new_mean) * total)
+            d.watch_ratio_mean = float(new_mean)
 
         elif adj["type"] == "watch_ratio_variance":
-            # Adjust a+b (concentration) to better match distribution shape
-            # Lower a+b = more spread (U-shape), higher = more concentrated (bell)
             for d in new_dists:
                 total = d.watch_ratio_beta_a + d.watch_ratio_beta_b
                 mean = d.watch_ratio_beta_a / total
-                # Reduce concentration slightly to allow more variance
-                new_total = max(total * (1.0 - lr * 0.5), 2.0)  # min total=2
+                new_total = max(total * (1.0 - lr * 0.5), 2.0)
                 d.watch_ratio_beta_a = float(mean * new_total)
                 d.watch_ratio_beta_b = float((1 - mean) * new_total)
 
