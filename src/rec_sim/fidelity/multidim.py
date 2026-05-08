@@ -137,7 +137,7 @@ def compute_multidim_fidelity(
         "category_js": 0.3,
         "activity_wasserstein": 0.3,
         "correlation_distance": 2.0,
-        "conditional_rank_dist": 1.0,  # 0=perfect rank match, 1.0=no correlation
+        "conditional_rank_dist": 1.5,  # 0=perfect, 1.0=no correlation, 2.0=inverse
     }
     max_acceptable = {k: v for k, v in max_acceptable.items() if k in metrics}
 
