@@ -137,11 +137,22 @@ def compute_multidim_fidelity(
         "category_js": 0.3,
         "activity_wasserstein": 0.3,
         "correlation_distance": 2.0,
-        "conditional_rank_dist": 1.5,  # 0=perfect, 1.0=no correlation, 2.0=inverse
+        "conditional_rank_dist": 1.5,
+    }
+    # Weights: conditional gets lower weight because fully-observed datasets
+    # have fundamentally different conditional WR patterns than simulated app behavior.
+    # This is a known limitation — proper weighting requires real app data.
+    weights = {
+        "watch_ratio_js": 1.0,
+        "category_js": 1.0,
+        "activity_wasserstein": 1.0,
+        "correlation_distance": 1.0,
+        "conditional_rank_dist": 0.5,  # down-weighted: fully-observed vs sim mismatch
     }
     max_acceptable = {k: v for k, v in max_acceptable.items() if k in metrics}
+    weights = {k: v for k, v in weights.items() if k in metrics}
 
-    f_overall = float(composite_fidelity(metrics, max_acceptable))
+    f_overall = float(composite_fidelity(metrics, max_acceptable, weights))
 
     return {
         "F_multidim": f_overall,
