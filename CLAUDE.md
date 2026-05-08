@@ -37,44 +37,38 @@ python3 -m pytest tests/ -v -s
 - H5 Dashboard at `http://localhost/research/rec_sim/reports/dashboard.html` (Mac)
 - All docs written and pushed
 
-### Latest Fidelity (after activity normalization)
+### Latest Fidelity (R4: DeepSeek + 10 videos)
 ```
-F_overall:   0.440
-F_multidim:  0.489
-  category_js:          0.835  ✅ fixed
-  correlation:          0.811  ✅ ok
-  activity_wasserstein: 0.415  ✅ fixed (was 0.000)
-  watch_ratio_js:       0.385  ⚠️ needs calibration loop
-  conditional_delta:    0.000  ⚠️ 28% deviation, needs calibration loop
+F_overall:   0.420
+F_multidim:  0.562
+  category_js:          0.835  ✅ stable
+  correlation:          0.799  ✅ ok
+  conditional_rank_dist:0.529  ✅ improved (was 0.000)
+  watch_ratio_js:       0.404  ⚠️ needs bimodal distribution
+  activity_wasserstein: 0.228  ⚠️ needs more videos/session
 ```
 
-### Decision Log
-- **Activity fidelity**: Using normalization (方案A) instead of increasing simulation volume.
-  Reason: KuaiRec has ~3327 videos/user (fully-observed dataset), simulation has 10.
-  Comparing raw interaction counts is meaningless. Normalize to per-user behavioral
-  distributions (avg_watch_ratio, watch_ratio_std, etc.) instead of raw counts.
-  **TODO for later**: Re-run with videos_per_session=100+ to test if higher volume
-  changes the fidelity picture. This is a tunable knob, not a code fix.
+### Optimization History (R1-R4, see docs/optimization-log.md)
+| Round | F_multidim | Key Change |
+|-------|-----------|------------|
+| Base  | 0.497 | - |
+| R1    | 0.406 | Spearman rank (stricter metrics) |
+| R2    | 0.543 | Fix thresholds |
+| R3    | 0.532 | Interest differentiation |
+| R4    | 0.562 | DeepSeek LLM (conditional improved) |
 
-### Known Issues (come back after MVP)
-- **conditional_delta = 0.278**: 各品类完播率偏差 28%，需要校准环修正
-- **watch_ratio_js = 0.184**: 完播率分布形状差距，需要校准环修正
-- **activity volume**: 当前 videos_per_session=10，可增大到 100+ 重测
+### Post-MVP Improvements (2026-05-08)
+Done:
+- ~~Increase videos_per_session~~ → 10→50 (R5, awaiting Mac result)
+- ~~Interest drift~~ → decay watched categories, boost unseen
+- ~~Per-archetype calibration~~ → replace global tuning
+- ~~Snap decision mechanism~~ → bimodal WR distribution (hooked/skip)
 
-### MVP Completion Status
-1. ~~Fix activity normalization~~ → Done
-2. ~~Calibration loop~~ → Done (outer + mid loops, auto Beta param adjustment)
-3. ~~Layer 2 LLM integration~~ → Done (DeepSeek/OpenAI/Mock providers, wired into engine)
-4. ~~Extrapolation~~ → Done (GMM-based, 1000→1B with weighted representatives)
-5. ~~Evaluation layer~~ → Done (A/B test with Mann-Whitney U, Welch's t, Cohen's d)
-6. ~~Full pipeline script~~ → Done (scripts/run_full_pipeline.py, runs all 7 steps)
-
-### Post-MVP Improvements
-- Increase videos_per_session for higher fidelity
+Remaining:
 - Vine Copula (replace GMM) for better joint distribution modeling
 - Support Points + Column Generation for persona optimization
 - LLM inner loop in calibration (audit Layer 1 decisions)
-- Persona narrative generation (LLM-driven natural language profiles)
+- Parallel simulation + LLM caching for performance
 - Dashboard historical comparison (multiple reports over time)
 
 ## Key Documentation
