@@ -166,11 +166,20 @@ def generate_report(
             float(np.mean(wrs)) for wrs in agent_wrs.values()
         ]) if agent_wrs else np.array([0.0])
 
-        # Build per-user avg watch_ratio for real users (from archetype distributions)
-        real_user_avg_wr = np.concatenate([
-            d.sample_watch_ratios(d.n_users, seed=42)
-            for d in distributions
-        ]) if distributions else np.array([0.0])
+        # Build per-user avg watch_ratio for real users
+        # Prefer actual per-user stats from real_data if available
+        if real_data and real_data.real_interactions_per_user.size > 0:
+            # real_interactions_per_user was repurposed; use real WR by category as proxy
+            # Compute per-user avg WR from real_wr_by_category (flatten all categories)
+            all_real_wrs = []
+            for cat_wrs in real_data.real_wr_by_category.values():
+                all_real_wrs.extend(cat_wrs[:100])  # sample to keep size manageable
+            real_user_avg_wr = np.array(all_real_wrs) if all_real_wrs else np.array([0.5])
+        else:
+            real_user_avg_wr = np.concatenate([
+                d.sample_watch_ratios(d.n_users, seed=42)
+                for d in distributions
+            ]) if distributions else np.array([0.0])
 
         act_fidelity = activity_distribution_fidelity(real_user_avg_wr, sim_user_avg_wr)
     else:

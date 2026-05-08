@@ -29,8 +29,18 @@ def conditional_fidelity(
     real_wr_by_cat: dict[str, list[float]],
     sim_wr_by_cat: dict[str, list[float]],
 ) -> dict:
-    """Compare P(watch_ratio | category) between real and simulated."""
+    """Compare P(watch_ratio | category) between real and simulated.
+
+    Uses both absolute delta AND Spearman rank correlation.
+    Rank correlation is more robust when real/sim have different absolute
+    scales (e.g. fully-observed dataset vs simulated app behavior).
+    """
+    from scipy.stats import spearmanr
+
     results = {}
+    real_means = {}
+    sim_means = {}
+
     for cat in sorted(set(list(real_wr_by_cat.keys()) + list(sim_wr_by_cat.keys()))):
         real_vals = real_wr_by_cat.get(cat, [])
         sim_vals = sim_wr_by_cat.get(cat, [])
@@ -38,12 +48,29 @@ def conditional_fidelity(
             continue
         real_arr = np.array(real_vals)
         sim_arr = np.array(sim_vals)
+        r_mean = float(real_arr.mean())
+        s_mean = float(sim_arr.mean())
+        real_means[cat] = r_mean
+        sim_means[cat] = s_mean
         results[cat] = {
-            "real_mean": float(real_arr.mean()),
-            "sim_mean": float(sim_arr.mean()),
-            "delta": float(abs(real_arr.mean() - sim_arr.mean())),
+            "real_mean": r_mean,
+            "sim_mean": s_mean,
+            "delta": float(abs(r_mean - s_mean)),
             "wasserstein": float(wasserstein_1d(real_arr, sim_arr)),
         }
+
+    # Compute Spearman rank correlation across categories
+    common_cats = sorted(set(real_means.keys()) & set(sim_means.keys()))
+    if len(common_cats) >= 3:
+        real_ranks = [real_means[c] for c in common_cats]
+        sim_ranks = [sim_means[c] for c in common_cats]
+        rho, p_value = spearmanr(real_ranks, sim_ranks)
+        results["_rank_correlation"] = {
+            "spearman_rho": float(rho) if not np.isnan(rho) else 0.0,
+            "p_value": float(p_value) if not np.isnan(p_value) else 1.0,
+            "n_categories": len(common_cats),
+        }
+
     return results
 
 
@@ -94,16 +121,23 @@ def compute_multidim_fidelity(
         "correlation_distance": correlation_result.get("normalized_distance", 0),
     }
 
-    cond_deltas = [v["delta"] for v in conditional_results.values()]
-    if cond_deltas:
-        metrics["conditional_avg_delta"] = float(np.mean(cond_deltas))
+    # Conditional: use Spearman rank correlation (robust to scale differences)
+    # rho ∈ [-1, 1], convert to distance: 1 - rho ∈ [0, 2], lower = better
+    rank_info = conditional_results.get("_rank_correlation", {})
+    if rank_info:
+        rho = rank_info.get("spearman_rho", 0)
+        metrics["conditional_rank_dist"] = float(1.0 - rho)  # 0=perfect, 2=inverse
+    else:
+        cond_deltas = [v["delta"] for v in conditional_results.values() if isinstance(v, dict) and "delta" in v]
+        if cond_deltas:
+            metrics["conditional_rank_dist"] = float(np.mean(cond_deltas))
 
     max_acceptable = {
         "watch_ratio_js": 0.3,
         "category_js": 0.3,
-        "activity_wasserstein": 0.3,  # normalized: comparing per-user avg_wr distributions (0-1 range)
+        "activity_wasserstein": 0.3,
         "correlation_distance": 2.0,
-        "conditional_avg_delta": 0.2,
+        "conditional_rank_dist": 1.0,  # 0=perfect rank match, 1.0=no correlation
     }
     max_acceptable = {k: v for k, v in max_acceptable.items() if k in metrics}
 

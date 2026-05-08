@@ -45,7 +45,7 @@ def test_calibration_improves_or_stable():
     cal_config = CalibrationConfig(
         max_outer_iterations=1, max_mid_iterations=5,
         f_multidim_target=1.1,  # unreachable (>1.0), forces all iterations
-        per_dim_targets={"watch_ratio_js": 0.99, "conditional_avg_delta": 0.99},
+        per_dim_targets={"watch_ratio_js": 0.99, "conditional_rank_dist": 0.99},
     )
 
     result = calibrate(dists, sim_config, real_data, cal_config)

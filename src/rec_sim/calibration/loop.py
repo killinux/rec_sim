@@ -117,11 +117,20 @@ def calibrate(
             step_record["status"] = "adjusting"
             history.append(step_record)
 
-            # Apply adjustments
+            # Apply adjustments with rollback
             if not adjustments:
                 break  # nothing to adjust, exit mid loop
 
+            prev_dists = [copy.deepcopy(d) for d in current_dists]
+            prev_f = f_multidim
             current_dists = _apply_adjustments(current_dists, adjustments, cal_config)
+
+            # Rollback check: if F gets worse, revert and shrink lr
+            if total_iterations > 1 and f_multidim < prev_f - 0.01:
+                current_dists = prev_dists
+                cal_config = copy.copy(cal_config)
+                cal_config.learning_rate *= 0.5
+                step_record["status"] = "rollback"
 
         # End of mid loop — if we get here without converging,
         # outer loop could rebuild personas (not implemented in MVP)
@@ -163,11 +172,15 @@ def _compute_adjustments(
                 "reason": f"avg WR gap: target={target_wr:.3f} actual={actual_wr:.3f}",
             })
 
-    # 2. Conditional distribution gap → adjust per-category behavior
-    cond_score = per_dim.get("conditional_avg_delta", 1.0)
-    if cond_score < cal_config.per_dim_targets.get("conditional_avg_delta", 0.5):
+    # 2. Conditional rank distance → adjust if rank correlation is poor
+    cond_score = per_dim.get("conditional_rank_dist", 1.0)
+    if cond_score < cal_config.per_dim_targets.get("conditional_rank_dist", 0.5):
         cond_data = report.get("fidelity_multidim", {}).get("conditional_wr_by_category", {})
         for cat, vals in cond_data.items():
+            if cat.startswith("_"):
+                continue
+            if not isinstance(vals, dict):
+                continue
             cat_delta = vals.get("real_mean", 0.5) - vals.get("sim_mean", 0.5)
             if abs(cat_delta) > 0.05:
                 adjustments.append({
@@ -176,6 +189,15 @@ def _compute_adjustments(
                     "delta": cat_delta,
                     "reason": f"cat {cat}: real={vals.get('real_mean',0):.3f} sim={vals.get('sim_mean',0):.3f}",
                 })
+
+    # 3. Watch ratio JS high → adjust Beta variance (a+b controls concentration)
+    wr_js_raw = raw_metrics.get("watch_ratio_js", 0)
+    if wr_js_raw > 0.15:
+        adjustments.append({
+            "type": "watch_ratio_variance",
+            "js_value": wr_js_raw,
+            "reason": f"WR distribution shape mismatch, JS={wr_js_raw:.3f}",
+        })
 
     return adjustments
 
@@ -211,11 +233,9 @@ def _apply_adjustments(
                 d.watch_ratio_mean = float(new_mean)
 
         elif adj["type"] == "conditional_wr_shift":
-            # Adjust distributions that are most associated with this category
-            # For MVP: apply a smaller shift to all distributions
             delta = adj["delta"]
             for d in new_dists:
-                shift = lr * delta * 0.3  # smaller effect for conditional
+                shift = lr * delta * 0.3
                 original_mean = d.watch_ratio_beta_a / (d.watch_ratio_beta_a + d.watch_ratio_beta_b)
                 max_shift = original_mean / reg
                 clamped_shift = max(min(shift, max_shift), -max_shift)
@@ -224,5 +244,16 @@ def _apply_adjustments(
                 d.watch_ratio_beta_a = float(new_mean * total)
                 d.watch_ratio_beta_b = float((1 - new_mean) * total)
                 d.watch_ratio_mean = float(new_mean)
+
+        elif adj["type"] == "watch_ratio_variance":
+            # Adjust a+b (concentration) to better match distribution shape
+            # Lower a+b = more spread (U-shape), higher = more concentrated (bell)
+            for d in new_dists:
+                total = d.watch_ratio_beta_a + d.watch_ratio_beta_b
+                mean = d.watch_ratio_beta_a / total
+                # Reduce concentration slightly to allow more variance
+                new_total = max(total * (1.0 - lr * 0.5), 2.0)  # min total=2
+                d.watch_ratio_beta_a = float(mean * new_total)
+                d.watch_ratio_beta_b = float((1 - mean) * new_total)
 
     return new_dists
