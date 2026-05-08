@@ -1,0 +1,445 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>RecSim Architecture</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #0a0e1a; color: #c9d1d9; min-height: 100vh; overflow-x: hidden; }
+.header { text-align: center; padding: 40px 20px 20px; }
+.header h1 { font-size: 28px; font-weight: 700; color: #f0f6fc; letter-spacing: 1px; }
+.header p { color: #8b949e; margin-top: 8px; font-size: 14px; }
+.container { max-width: 1100px; margin: 0 auto; padding: 20px; }
+
+/* Layer stack */
+.layer-stack { display: flex; flex-direction: column; gap: 4px; margin: 30px 0; }
+.layer {
+  border-radius: 12px; padding: 20px 24px; cursor: pointer;
+  transition: all 0.3s ease; position: relative; overflow: hidden;
+  border: 1px solid transparent;
+}
+.layer:hover { transform: translateX(6px); border-color: rgba(255,255,255,0.15); }
+.layer.active { border-color: rgba(255,255,255,0.3); }
+.layer-num { position: absolute; left: 16px; top: 50%; transform: translateY(-50%); font-size: 36px; font-weight: 800; opacity: 0.1; }
+.layer-content { margin-left: 40px; }
+.layer-title { font-size: 16px; font-weight: 600; color: #f0f6fc; }
+.layer-subtitle { font-size: 12px; color: #8b949e; margin-top: 2px; }
+.layer-tags { display: flex; gap: 6px; margin-top: 8px; flex-wrap: wrap; }
+.tag { font-size: 11px; padding: 2px 8px; border-radius: 10px; background: rgba(255,255,255,0.08); color: #8b949e; }
+.tag.llm { background: rgba(168,85,247,0.2); color: #c084fc; }
+.tag.done { background: rgba(34,197,94,0.2); color: #4ade80; }
+.tag.math { background: rgba(59,130,246,0.2); color: #60a5fa; }
+
+.l-eval { background: linear-gradient(135deg, #1a1e2e 0%, #1e2740 100%); }
+.l-extrap { background: linear-gradient(135deg, #1a1e2e 0%, #251e30 100%); }
+.l-calib { background: linear-gradient(135deg, #1a1e2e 0%, #2a1e1e 100%); }
+.l-interact { background: linear-gradient(135deg, #1a1e2e 0%, #1e2a20 100%); }
+.l-persona { background: linear-gradient(135deg, #1a1e2e 0%, #2a2a1e 100%); }
+.l-base { background: linear-gradient(135deg, #1a1e2e 0%, #1e2a2a 100%); }
+
+/* Detail panel */
+.detail-panel {
+  background: #161b22; border-radius: 12px; padding: 24px;
+  margin: 20px 0; border: 1px solid #30363d;
+  display: none; animation: fadeIn 0.3s ease;
+}
+.detail-panel.visible { display: block; }
+@keyframes fadeIn { from { opacity: 0; transform: translateY(-10px); } to { opacity: 1; transform: translateY(0); } }
+.detail-panel h3 { font-size: 18px; color: #f0f6fc; margin-bottom: 16px; }
+.detail-section { margin-bottom: 20px; }
+.detail-section h4 { font-size: 13px; color: #8b949e; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 8px; }
+.detail-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 10px; }
+.detail-card { background: #0d1117; border-radius: 8px; padding: 12px; border: 1px solid #21262d; }
+.detail-card .label { font-size: 11px; color: #8b949e; }
+.detail-card .value { font-size: 14px; color: #f0f6fc; margin-top: 2px; }
+.detail-card .desc { font-size: 12px; color: #6e7681; margin-top: 4px; }
+
+/* Flow arrows */
+.flow-section { margin: 40px 0; }
+.flow-section h2 { font-size: 20px; color: #f0f6fc; margin-bottom: 20px; text-align: center; }
+.flow-diagram { display: flex; align-items: center; justify-content: center; flex-wrap: wrap; gap: 0; padding: 20px; }
+.flow-step { background: #161b22; border: 1px solid #30363d; border-radius: 10px; padding: 14px 18px; text-align: center; min-width: 120px; }
+.flow-step .step-num { font-size: 20px; font-weight: 700; color: #58a6ff; }
+.flow-step .step-name { font-size: 12px; color: #c9d1d9; margin-top: 4px; }
+.flow-step .step-file { font-size: 10px; color: #6e7681; margin-top: 2px; font-family: monospace; }
+.flow-arrow { font-size: 20px; color: #30363d; padding: 0 6px; }
+
+/* Decision engine */
+.decision-section { margin: 40px 0; }
+.decision-flow { display: flex; flex-direction: column; gap: 4px; max-width: 600px; margin: 0 auto; }
+.decision-layer { display: flex; align-items: stretch; gap: 4px; }
+.decision-box {
+  flex: 1; border-radius: 8px; padding: 14px; text-align: center;
+  font-size: 13px; position: relative;
+}
+.decision-box .box-title { font-weight: 600; font-size: 14px; margin-bottom: 4px; }
+.decision-box .box-desc { font-size: 11px; opacity: 0.7; }
+.d-l0 { background: linear-gradient(135deg, #dc2626 0%, #991b1b 100%); color: white; }
+.d-l1 { background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%); color: white; }
+.d-l2 { background: linear-gradient(135deg, #7c3aed 0%, #5b21b6 100%); color: white; }
+.d-skip { background: #21262d; color: #f87171; font-size: 12px; padding: 8px; border-radius: 6px; text-align: center; }
+.d-pass { background: #21262d; color: #4ade80; font-size: 12px; padding: 8px; border-radius: 6px; text-align: center; }
+.d-output { background: #161b22; border: 1px dashed #30363d; border-radius: 8px; padding: 12px; text-align: center; font-size: 12px; color: #8b949e; }
+.decision-arrow { text-align: center; color: #30363d; font-size: 18px; padding: 2px 0; }
+
+/* Fidelity */
+.fidelity-section { margin: 40px 0; }
+.fidelity-dims { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 10px; }
+.fidelity-dim {
+  background: #161b22; border-radius: 8px; padding: 14px; border: 1px solid #21262d;
+  text-align: center;
+}
+.fidelity-dim .dim-name { font-size: 12px; color: #8b949e; }
+.fidelity-dim .dim-metric { font-size: 11px; color: #6e7681; margin-top: 2px; }
+.fidelity-dim .dim-bar { height: 6px; background: #21262d; border-radius: 3px; margin-top: 8px; overflow: hidden; }
+.fidelity-dim .dim-fill { height: 100%; border-radius: 3px; }
+
+/* Metrics banner */
+.metrics-banner {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px;
+  margin: 30px 0; padding: 20px; background: #161b22; border-radius: 12px; border: 1px solid #30363d;
+}
+.metric-item { text-align: center; }
+.metric-item .m-value { font-size: 24px; font-weight: 700; }
+.metric-item .m-label { font-size: 11px; color: #8b949e; margin-top: 2px; }
+.m-green { color: #4ade80; }
+.m-yellow { color: #fbbf24; }
+.m-blue { color: #60a5fa; }
+.m-purple { color: #c084fc; }
+.m-red { color: #f87171; }
+
+/* Footer */
+.footer { text-align: center; padding: 40px; color: #484f58; font-size: 12px; }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <h1>RecSim System Architecture</h1>
+  <p>Large-scale User Simulation for Short-Video Recommendation | Closed-Loop Calibration</p>
+</div>
+
+<div class="container">
+
+  <!-- MVP Metrics -->
+  <div class="metrics-banner">
+    <div class="metric-item"><div class="m-value m-blue">85</div><div class="m-label">Tests Passed</div></div>
+    <div class="metric-item"><div class="m-value m-purple">25</div><div class="m-label">Python Modules</div></div>
+    <div class="metric-item"><div class="m-value m-yellow">0.497</div><div class="m-label">F_multidim</div></div>
+    <div class="metric-item"><div class="m-value m-green">1B</div><div class="m-label">Extrapolated Users</div></div>
+    <div class="metric-item"><div class="m-value m-red">16.1%</div><div class="m-label">LLM Decisions</div></div>
+    <div class="metric-item"><div class="m-value m-green">¥0.10</div><div class="m-label">Cost / Pipeline Run</div></div>
+  </div>
+
+  <!-- Layer Stack -->
+  <div class="layer-stack">
+    <div class="layer l-eval" onclick="toggleDetail('eval')">
+      <div class="layer-num">6</div>
+      <div class="layer-content">
+        <div class="layer-title">Evaluation Layer</div>
+        <div class="layer-subtitle">A/B test framework, algorithm comparison, statistical significance</div>
+        <div class="layer-tags">
+          <span class="tag done">done</span>
+          <span class="tag math">Mann-Whitney U</span>
+          <span class="tag math">Welch's t</span>
+          <span class="tag math">Cohen's d</span>
+          <span class="tag">evaluation/abtest.py</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="layer l-extrap" onclick="toggleDetail('extrap')">
+      <div class="layer-num">5</div>
+      <div class="layer-content">
+        <div class="layer-title">Extrapolation Layer</div>
+        <div class="layer-subtitle">1,000 agents → 1,000,000,000 users via GMM + weighted sampling</div>
+        <div class="layer-tags">
+          <span class="tag done">done</span>
+          <span class="tag math">GMM</span>
+          <span class="tag math">OT Weights</span>
+          <span class="tag">extrapolation/scaler.py</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="layer l-calib" onclick="toggleDetail('calib')">
+      <div class="layer-num">4</div>
+      <div class="layer-content">
+        <div class="layer-title">Calibration Loop</div>
+        <div class="layer-subtitle">3 nested loops: detect drift → adjust params → re-simulate → converge</div>
+        <div class="layer-tags">
+          <span class="tag done">done</span>
+          <span class="tag math">Beta param tuning</span>
+          <span class="tag math">Regularization</span>
+          <span class="tag">calibration/loop.py</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="layer l-interact" onclick="toggleDetail('interact')">
+      <div class="layer-num">3</div>
+      <div class="layer-content">
+        <div class="layer-title">Interaction Layer</div>
+        <div class="layer-subtitle">3-layer decision engine: L0 experience × L1 content × L2 LLM emergent</div>
+        <div class="layer-tags">
+          <span class="tag done">done</span>
+          <span class="tag llm">DeepSeek LLM</span>
+          <span class="tag">layer0.py</span>
+          <span class="tag">layer1.py</span>
+          <span class="tag">layer2.py</span>
+          <span class="tag">engine.py</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="layer l-persona" onclick="toggleDetail('persona')">
+      <div class="layer-num">2</div>
+      <div class="layer-content">
+        <div class="layer-title">Persona Generation</div>
+        <div class="layer-subtitle">OR-optimized placement: LHS + Support Points + Column Generation</div>
+        <div class="layer-tags">
+          <span class="tag done">done</span>
+          <span class="tag math">Latin Hypercube</span>
+          <span class="tag math">Beta/LogNormal</span>
+          <span class="tag">persona/skeleton.py</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="layer l-base" onclick="toggleDetail('base')">
+      <div class="layer-num">1</div>
+      <div class="layer-content">
+        <div class="layer-title">Baseline Distribution</div>
+        <div class="layer-subtitle">KuaiRec → unified schema → KMeans clustering → joint distribution</div>
+        <div class="layer-tags">
+          <span class="tag done">done</span>
+          <span class="tag">loader.py</span>
+          <span class="tag">clustering.py</span>
+          <span class="tag">distribution.py</span>
+          <span class="tag">interest.py</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Detail Panels -->
+  <div id="detail-eval" class="detail-panel">
+    <h3>Evaluation Layer — A/B Test Framework</h3>
+    <div class="detail-section">
+      <h4>What it does</h4>
+      <div class="detail-grid">
+        <div class="detail-card"><div class="label">Input</div><div class="value">Control vs Treatment configs</div></div>
+        <div class="detail-card"><div class="label">Output</div><div class="value">Winner + p-value + effect size</div></div>
+        <div class="detail-card"><div class="label">Stats</div><div class="value">Mann-Whitney U, Welch's t, Cohen's d</div></div>
+      </div>
+    </div>
+    <div class="detail-section">
+      <h4>MVP Result: 10 vs 30 videos/session</h4>
+      <div class="detail-grid">
+        <div class="detail-card"><div class="label">Watch %</div><div class="value">74.6% → 67.0%</div><div class="desc">-10.2%, longer = more fatigue</div></div>
+        <div class="detail-card"><div class="label">Skip Rate</div><div class="value">9.1% → 11.7%</div><div class="desc">+28.3%</div></div>
+        <div class="detail-card"><div class="label">p-value</div><div class="value">&lt; 0.0001</div><div class="desc">Statistically significant</div></div>
+        <div class="detail-card"><div class="label">Cohen's d</div><div class="value">-0.445</div><div class="desc">Medium effect</div></div>
+      </div>
+    </div>
+  </div>
+
+  <div id="detail-extrap" class="detail-panel">
+    <h3>Extrapolation — 1,000 → 1,000,000,000</h3>
+    <div class="detail-section">
+      <h4>Method</h4>
+      <div class="detail-grid">
+        <div class="detail-card"><div class="label">Model</div><div class="value">Gaussian Mixture (10 components)</div><div class="desc">Fit to per-agent behavioral features</div></div>
+        <div class="detail-card"><div class="label">Representatives</div><div class="value">5,000</div><div class="desc">Weighted samples summing to 1B</div></div>
+        <div class="detail-card"><div class="label">Quality (JS)</div><div class="value">0.040</div><div class="desc">Distribution preserved</div></div>
+      </div>
+    </div>
+    <div class="detail-section">
+      <h4>Population Segments</h4>
+      <div class="detail-grid">
+        <div class="detail-card"><div class="label">Heavy (WR&gt;70%)</div><div class="value">739M</div><div class="desc">73.9%</div></div>
+        <div class="detail-card"><div class="label">Medium (30-70%)</div><div class="value">241M</div><div class="desc">24.1%</div></div>
+        <div class="detail-card"><div class="label">Light (WR&lt;30%)</div><div class="value">20M</div><div class="desc">2.0%</div></div>
+      </div>
+    </div>
+  </div>
+
+  <div id="detail-calib" class="detail-panel">
+    <h3>Calibration Loop — Closed-Loop Parameter Tuning</h3>
+    <div class="detail-section">
+      <h4>3 Nested Loops</h4>
+      <div class="detail-grid">
+        <div class="detail-card"><div class="label">Outer Loop</div><div class="value">Persona Rebuild</div><div class="desc">Triggered when marginal drift &gt; 15%</div></div>
+        <div class="detail-card"><div class="label">Mid Loop</div><div class="value">Parameter Tuning</div><div class="desc">Adjust Beta(a,b) per archetype</div></div>
+        <div class="detail-card"><div class="label">Inner Loop</div><div class="value">LLM Audit</div><div class="desc">L2 spot-checks L1 decisions (planned)</div></div>
+      </div>
+    </div>
+    <div class="detail-section">
+      <h4>Tuning Mechanism</h4>
+      <div class="detail-grid">
+        <div class="detail-card"><div class="label">Method</div><div class="value">Beta mean shift</div><div class="desc">mean = a/(a+b), adjust a to shift</div></div>
+        <div class="detail-card"><div class="label">Learning Rate</div><div class="value">0.05</div><div class="desc">Conservative to prevent thrashing</div></div>
+        <div class="detail-card"><div class="label">Regularization</div><div class="value">4.0</div><div class="desc">max_shift = mean / reg</div></div>
+      </div>
+    </div>
+  </div>
+
+  <div id="detail-interact" class="detail-panel">
+    <h3>Interaction Layer — 3-Layer Decision Engine</h3>
+    <div class="detail-section">
+      <h4>Input Dimensions</h4>
+      <div class="detail-grid">
+        <div class="detail-card"><div class="label">User Profile</div><div class="value">Persona skeleton</div><div class="desc">watch_baseline, stall_tolerance, quality_sensitivity</div></div>
+        <div class="detail-card"><div class="label">Infrastructure</div><div class="value">Quality + Latency</div><div class="desc">360p-1080p, stall_count, first_frame_ms, codec</div></div>
+        <div class="detail-card"><div class="label">Context</div><div class="value">Session state</div><div class="desc">first_visit/normal, time_slot, fatigue</div></div>
+      </div>
+    </div>
+  </div>
+
+  <div id="detail-persona" class="detail-panel">
+    <h3>Persona Generation — OR-Optimized Placement</h3>
+    <div class="detail-section">
+      <h4>Two-Stage Process</h4>
+      <div class="detail-grid">
+        <div class="detail-card"><div class="label">Stage 1: Skeleton</div><div class="value">Mathematical</div><div class="desc">LHS + proportional allocation from archetypes</div></div>
+        <div class="detail-card"><div class="label">Stage 2: Narrative</div><div class="value">LLM (planned)</div><div class="desc">Natural language persona from numeric params</div></div>
+      </div>
+    </div>
+    <div class="detail-section">
+      <h4>Placement Optimization</h4>
+      <div class="detail-grid">
+        <div class="detail-card"><div class="label">Phase A</div><div class="value">LHS (200 pts)</div><div class="desc">Main effects covered</div></div>
+        <div class="detail-card"><div class="label">Phase B</div><div class="value">Support Points (500)</div><div class="desc">Wasserstein-optimal (planned)</div></div>
+        <div class="detail-card"><div class="label">Phase C</div><div class="value">Column Gen (300)</div><div class="desc">Iterative gap-filling (planned)</div></div>
+        <div class="detail-card"><div class="label">Phase D</div><div class="value">OT Weights</div><div class="desc">Optimal Transport reweighting</div></div>
+      </div>
+    </div>
+  </div>
+
+  <div id="detail-base" class="detail-panel">
+    <h3>Baseline Distribution — Real Data Foundation</h3>
+    <div class="detail-section">
+      <h4>Data Sources</h4>
+      <div class="detail-grid">
+        <div class="detail-card"><div class="label">KuaiRec (Primary)</div><div class="value">4.7M interactions</div><div class="desc">1411 users × 3327 videos, fully observed</div></div>
+        <div class="detail-card"><div class="label">MovieLens-25M</div><div class="value">25M ratings</div><div class="desc">Long-tail interest supplement</div></div>
+        <div class="detail-card"><div class="label">MIND</div><div class="value">15M impressions</div><div class="desc">News consumption patterns (pending)</div></div>
+      </div>
+    </div>
+    <div class="detail-section">
+      <h4>Processing Pipeline</h4>
+      <div class="detail-grid">
+        <div class="detail-card"><div class="label">Step 1</div><div class="value">Unified Schema</div><div class="desc">(user_id, item_id, watch_ratio, duration)</div></div>
+        <div class="detail-card"><div class="label">Step 2</div><div class="value">KMeans Clustering</div><div class="desc">15-dim features → 20 archetypes</div></div>
+        <div class="detail-card"><div class="label">Step 3</div><div class="value">Distribution Fitting</div><div class="desc">Beta(a,b) + LogNormal(μ,σ) per archetype</div></div>
+        <div class="detail-card"><div class="label">Step 4</div><div class="value">Interest Vectors</div><div class="desc">31 categories, cosine similarity matching</div></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Decision Engine Flow -->
+  <div class="decision-section">
+    <h2 style="font-size:20px;color:#f0f6fc;text-align:center;margin-bottom:20px;">Decision Engine — L0 × L1 × L2</h2>
+    <div class="decision-flow">
+      <div class="d-output">Video arrives from RecSys → (category, quality, latency, interest_match)</div>
+      <div class="decision-arrow">▼</div>
+      <div class="decision-box d-l0">
+        <div class="box-title">Layer 0: Experience</div>
+        <div class="box-desc">stall_penalty + quality_penalty + first_frame_penalty → watch_pct_factor</div>
+      </div>
+      <div class="decision-layer">
+        <div class="d-skip" style="flex:1">force_exit → EXIT APP</div>
+        <div class="d-skip" style="flex:1">force_skip → SKIP</div>
+        <div class="d-pass" style="flex:2">pass → L0_factor to next layer</div>
+      </div>
+      <div class="decision-arrow">▼</div>
+      <div class="decision-layer">
+        <div class="decision-box d-l2" style="flex:1">
+          <div class="box-title">Layer 2: LLM</div>
+          <div class="box-desc">Triggered: first_visit, conflict, audit (16%)</div>
+        </div>
+        <div class="decision-box d-l1" style="flex:2">
+          <div class="box-title">Layer 1: Content</div>
+          <div class="box-desc">interest × baseline - fatigue + noise (84%)</div>
+        </div>
+      </div>
+      <div class="decision-arrow">▼</div>
+      <div class="d-output">
+        watch_pct = L1_base × L0_factor &nbsp;|&nbsp; action: watch / skip &nbsp;|&nbsp; liked / commented / shared
+        <br><span style="color:#6e7681;font-size:11px;">fidelity_tag: rule | parametric | llm | cached</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Pipeline Flow -->
+  <div class="flow-section">
+    <h2>End-to-End Pipeline</h2>
+    <div class="flow-diagram">
+      <div class="flow-step"><div class="step-num">①</div><div class="step-name">Load Data</div><div class="step-file">loader.py</div></div>
+      <div class="flow-arrow">→</div>
+      <div class="flow-step"><div class="step-num">②</div><div class="step-name">Cluster</div><div class="step-file">clustering.py</div></div>
+      <div class="flow-arrow">→</div>
+      <div class="flow-step"><div class="step-num">③</div><div class="step-name">Extract Dist</div><div class="step-file">distribution.py</div></div>
+      <div class="flow-arrow">→</div>
+      <div class="flow-step"><div class="step-num">④</div><div class="step-name">Gen Persona</div><div class="step-file">skeleton.py</div></div>
+      <div class="flow-arrow">→</div>
+      <div class="flow-step"><div class="step-num">⑤</div><div class="step-name">Simulate</div><div class="step-file">runner.py</div></div>
+      <div class="flow-arrow">→</div>
+      <div class="flow-step"><div class="step-num">⑥</div><div class="step-name">Fidelity</div><div class="step-file">report.py</div></div>
+      <div class="flow-arrow">→</div>
+      <div class="flow-step"><div class="step-num">⑦</div><div class="step-name">Calibrate</div><div class="step-file">loop.py</div></div>
+      <div class="flow-arrow">→</div>
+      <div class="flow-step"><div class="step-num">⑧</div><div class="step-name">Scale 1B</div><div class="step-file">scaler.py</div></div>
+    </div>
+  </div>
+
+  <!-- Fidelity Dimensions -->
+  <div class="fidelity-section">
+    <h2 style="font-size:20px;color:#f0f6fc;text-align:center;margin-bottom:20px;">Multi-Dimensional Fidelity (F_multidim = 0.497)</h2>
+    <div class="fidelity-dims">
+      <div class="fidelity-dim">
+        <div class="dim-name">Category JS</div>
+        <div class="dim-metric">0.835</div>
+        <div class="dim-bar"><div class="dim-fill" style="width:83.5%;background:#4ade80"></div></div>
+      </div>
+      <div class="fidelity-dim">
+        <div class="dim-name">Correlation</div>
+        <div class="dim-metric">0.811</div>
+        <div class="dim-bar"><div class="dim-fill" style="width:81.1%;background:#4ade80"></div></div>
+      </div>
+      <div class="fidelity-dim">
+        <div class="dim-name">Watch Ratio JS</div>
+        <div class="dim-metric">0.457</div>
+        <div class="dim-bar"><div class="dim-fill" style="width:45.7%;background:#fbbf24"></div></div>
+      </div>
+      <div class="fidelity-dim">
+        <div class="dim-name">Activity</div>
+        <div class="dim-metric">0.389</div>
+        <div class="dim-bar"><div class="dim-fill" style="width:38.9%;background:#fbbf24"></div></div>
+      </div>
+      <div class="fidelity-dim">
+        <div class="dim-name">Conditional Δ</div>
+        <div class="dim-metric">0.000</div>
+        <div class="dim-bar"><div class="dim-fill" style="width:0%;background:#f87171"></div></div>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<div class="footer">
+  RecSim v0.1 | github.com/killinux/rec_sim | Built with KuaiRec + DeepSeek
+</div>
+
+<script>
+function toggleDetail(id) {
+  const panels = document.querySelectorAll('.detail-panel');
+  const target = document.getElementById('detail-' + id);
+  const wasVisible = target.classList.contains('visible');
+  panels.forEach(p => p.classList.remove('visible'));
+  if (!wasVisible) target.classList.add('visible');
+}
+</script>
+</body>
+</html>
