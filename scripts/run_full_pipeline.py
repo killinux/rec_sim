@@ -112,7 +112,7 @@ def run_pipeline():
         llm_provider = create_provider("mock")
         print("  No API key found, using MockProvider")
 
-    config = SimulationConfig(n_agents=100, videos_per_session=10, seed=42)
+    config = SimulationConfig(n_agents=100, videos_per_session=50, seed=42)
     t0 = time.time()
     result = run_simulation(config, dists, real_data=real_data, llm_provider=llm_provider)
     sim_time = time.time() - t0
@@ -186,14 +186,14 @@ def run_pipeline():
 
     # --- Step 7: A/B Test ---
     print("\n" + "=" * 60)
-    print("  Step 7: Running A/B test (10 vs 30 videos/session)...")
+    print("  Step 7: Running A/B test (50 vs 100 videos/session)...")
     print("=" * 60)
     t0 = time.time()
     ab_config = ABTestConfig(
         name="session_length_experiment",
-        control_label="10_videos",
-        treatment_label="30_videos",
-        treatment_overrides={"videos_per_session": 30},
+        control_label="50_videos",
+        treatment_label="100_videos",
+        treatment_overrides={"videos_per_session": 100},
     )
     ab_result = run_abtest(ab_config, cal_result.final_distributions, config, real_data=real_data)
     ab_time = time.time() - t0
