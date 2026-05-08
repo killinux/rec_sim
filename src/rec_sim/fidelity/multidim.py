@@ -78,9 +78,15 @@ def activity_distribution_fidelity(
     real_interactions_per_user: np.ndarray,
     sim_interactions_per_agent: np.ndarray,
 ) -> dict:
-    """Compare activity level (interactions per user) distributions."""
+    """Compare activity level (interactions per user) distributions.
+
+    Mean-centers both distributions before comparing so that session-length
+    differences (fatigue) don't dominate — we care about distribution shape.
+    """
+    real_centered = real_interactions_per_user - real_interactions_per_user.mean()
+    sim_centered = sim_interactions_per_agent - sim_interactions_per_agent.mean()
     return {
-        "wasserstein": float(wasserstein_1d(real_interactions_per_user, sim_interactions_per_agent)),
+        "wasserstein": float(wasserstein_1d(real_centered, sim_centered)),
         "real_mean": float(real_interactions_per_user.mean()),
         "sim_mean": float(sim_interactions_per_agent.mean()),
         "real_std": float(real_interactions_per_user.std()),
