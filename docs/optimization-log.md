@@ -361,5 +361,63 @@ conditional_rank_dist:0.604   raw=0.594   (持平)
 | R4 | 0.562 ↑ | activity=0.228, wr_js=0.404 | DeepSeek full pipeline | conditional 大幅改善 |
 | R5 | 0.467 ↓ | activity=0.000, wr_js=0.230 | videos_per_session 10→50 | conditional↑, 但 activity 崩了 |
 | R6 | 0.457 ↓ | wr_js=0.200, activity=0.000 | 兴趣漂移+per-arch校准+速决(过激) | 速决导致skip翻倍 |
-| R7 | _(待填)_ | _(待填)_ | +activity均值中心化 | _(待填)_ |
-| R8 | _(待填)_ | _(待填)_ | 速决调优(skip 40%→20%) | _(待填)_ |
+| R7 | **0.603 ↑** | wr_js=0.199, activity=0.529 | +activity均值中心化 | **校准首次收敛!** |
+| R8 | **0.630 ↑** | wr_js=0.192, activity=0.574 | 速决调优(skip 40%→20%) | **新最佳! 校准2轮收敛** |
+
+---
+
+## R7/R8 详细结果
+
+### R7: Activity 修复 + 校准突破
+
+**Pre-calibration:** F_multidim = 0.578
+**Post-calibration:** F_multidim = **0.603** (校准首次收敛, 10 iterations)
+
+```
+watch_ratio_js:       0.199   ← 速决仍过激
+category_js:          0.840   ← 稳定
+activity_wasserstein: 0.529   ← 均值中心化修复生效!
+correlation:          0.714   ← 稳定
+conditional_rank_dist:0.636   ← 好
+```
+
+### R8: 速决调优 + 全部改进
+
+**Pre-calibration:** F_multidim = 0.586
+**Post-calibration:** F_multidim = **0.630** (校准 2 轮收敛!)
+
+```
+watch_ratio_js:       0.192   ← 仍是最弱维度
+category_js:          0.840   ← 稳定
+activity_wasserstein: 0.574   ← 进一步改善
+correlation:          0.720   ← 稳定
+conditional_rank_dist:0.621   ← 好
+```
+
+### R8 关键指标
+
+- 总决策: 4645 (100 agents × ~46.5 avg videos, 有 exit)
+- LLM 决策: 657/4645 = 14.1%
+- 模拟时间: 928s
+- 校准: 仅 2 轮收敛 (F: 0.577→0.630)
+- 外推: 10 亿用户 (Heavy 0.7%, Medium 65.1%, Light 34.1%)
+- A/B test: 50 vs 100 videos, 差异显著 (p<0.0001, d=-0.16)
+
+---
+
+## 瓶颈分析与下一步
+
+### 当前瓶颈: watch_ratio_js = 0.192
+
+这是唯一低于 0.3 的维度（其他四个都在 0.57-0.84）。如果 watch_ratio_js 能提升到 0.5，F_multidim 可达 **0.70+**。
+
+**根因分析:**
+- 模拟的 WR 分布仍然偏钟型，缺少真实用户的双峰特征
+- 速决机制帮助有限（从 0.40 调到 0.20 对 JS 影响不大）
+- 核心问题: L1 参数化模型（Beta×cosine×sigmoid）产生的分布形状与真实用户根本不同
+
+**可能的改进方向:**
+1. **非参数 WR 采样**: 用 KuaiRec 的真实 WR 分布做 KDE，直接从经验分布采样
+2. **分段线性 interest→WR 映射**: 替代当前连续平滑函数
+3. **更多 LLM 介入**: 提高 L2 sample_rate (当前 10%→30%)，LLM 的决策更接近双峰
+4. **Vine Copula 外推**: 用非参数边缘+copula 相关性，替代 GMM

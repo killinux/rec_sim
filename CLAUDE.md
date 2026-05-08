@@ -37,37 +37,36 @@ python3 -m pytest tests/ -v -s
 - H5 Dashboard at `http://localhost/research/rec_sim/reports/dashboard.html` (Mac)
 - All docs written and pushed
 
-### Latest Fidelity (R4: DeepSeek + 10 videos)
+### Latest Fidelity (R8: DeepSeek + 50 videos, post-calibration)
 ```
-F_overall:   0.420
-F_multidim:  0.562
-  category_js:          0.835  ✅ stable
-  correlation:          0.799  ✅ ok
-  conditional_rank_dist:0.529  ✅ improved (was 0.000)
-  watch_ratio_js:       0.404  ⚠️ needs bimodal distribution
-  activity_wasserstein: 0.228  ⚠️ needs more videos/session
+F_multidim:  0.630   ← best so far (was 0.497 baseline)
+  category_js:          0.840  ✅ stable
+  correlation:          0.720  ✅ ok
+  conditional_rank_dist:0.621  ✅ good
+  activity_wasserstein: 0.574  ✅ fixed (was 0.000 in R5)
+  watch_ratio_js:       0.192  ⚠️ main bottleneck — distribution shape
 ```
 
-### Optimization History (R1-R4, see docs/optimization-log.md)
+### Optimization History (R1-R8, see docs/optimization-log.md)
 | Round | F_multidim | Key Change |
 |-------|-----------|------------|
-| Base  | 0.497 | - |
-| R1    | 0.406 | Spearman rank (stricter metrics) |
-| R2    | 0.543 | Fix thresholds |
-| R3    | 0.532 | Interest differentiation |
-| R4    | 0.562 | DeepSeek LLM (conditional improved) |
+| Base  | 0.497 | Initial 5-dim metrics |
+| R4    | 0.562 | DeepSeek LLM |
+| R5    | 0.467 | 50 videos (exposed activity bug) |
+| R7    | 0.603 | Activity mean-center fix, calibration converges |
+| R8    | **0.630** | Snap-skip tuned, calibration converges in 2 iterations |
 
 ### Post-MVP Improvements (2026-05-08)
 Done:
-- ~~Increase videos_per_session~~ → 10→50 (R5, awaiting Mac result)
+- ~~videos_per_session 10→50~~ → reduces per-user stat noise
 - ~~Interest drift~~ → decay watched categories, boost unseen
-- ~~Per-archetype calibration~~ → replace global tuning
-- ~~Snap decision mechanism~~ → bimodal WR distribution (hooked/skip)
+- ~~Per-archetype calibration~~ → replace global tuning (calibration now converges!)
+- ~~Snap decision mechanism~~ → bimodal WR distribution (tuned)
+- ~~Activity mean-center~~ → robust to session length differences
 
-Remaining:
+Next (to reach F=0.8):
+- Fix watch_ratio_js (0.192) — KDE-based WR sampling or higher LLM rate
 - Vine Copula (replace GMM) for better joint distribution modeling
-- Support Points + Column Generation for persona optimization
-- LLM inner loop in calibration (audit Layer 1 decisions)
 - Parallel simulation + LLM caching for performance
 - Dashboard historical comparison (multiple reports over time)
 
