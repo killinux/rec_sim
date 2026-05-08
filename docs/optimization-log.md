@@ -184,13 +184,39 @@ R2 修复有效：activity 和 conditional 都有分数了。但 conditional raw
 
 ### E2E F_multidim 结果
 
-_(等待 R3 Mac 返回...)_
+```
+F_multidim = 0.532 ← 微降（从 0.543）
+
+watch_ratio_js:       0.363   raw=0.191   ← JS 反而增大了
+category_js:          0.835   raw=0.050   (不变)
+activity_wasserstein: 0.226   raw=0.232   ← 也变差
+correlation:          0.799   raw=0.403   (微降)
+conditional_rank_dist:0.347   raw=0.979   ← rho 从 -0.1→0.02（改善）
+```
+
+### 诊断
+
+interest_boost 0.4→0.7 和 noise 0.08→0.12 让模拟分布更分散了，但方向不完全对——真实分布的双峰/U 型不是简单加大方差就能匹配的。需要更精细的建模。
+
+conditional rho 从 -0.1 升到 0.02——微弱改善，但仍接近零（品类排序仍不相关）。这是全观测 vs 模拟的结构性差异，参数调优帮助有限。
+
+**核心瓶颈：** 每人只看 10 个视频，per-user 统计量噪声太大，导致 activity 和 watch_ratio_js 在 0.2-0.4 之间波动但难以突破 0.7。
 
 ---
 
-## 第 4 轮
+## 第 4 轮: DeepSeek Full Pipeline
 
-_(待填)_
+### 策略转换
+
+前 3 轮是纯参数调优（改系数、改阈值、改权重），收益递减。第 4 轮转向：
+- 用 DeepSeek LLM 跑 full pipeline（Layer 2 介入 ~16% 决策）
+- LLM 在首刷/冲突场景下的决策更 context-sensitive
+- 校准环用调优后的参数（lr=0.05, reg=4.0）
+- 看 LLM 能否改善分布形状（更像真实的双峰分布）
+
+### E2E F_multidim 结果
+
+_(跑 DeepSeek pipeline 中...)_
 
 ---
 
@@ -201,4 +227,5 @@ _(待填)_
 | 基线 | 0.497 | conditional=0.000 | - | - |
 | R1 | 0.406 ↓ | conditional=0.000, activity=0.000 | Spearman+activity flatten+variance | 更严格，暴露问题 |
 | R2 | 0.543 ↑ | conditional=0.269, wr_js=0.385 | max_acceptable 1.5 + activity 回退 | activity 修好 |
-| R3 | _(待填)_ | _(待填)_ | conditional 降权 + interest 分化 | _(待填)_ |
+| R3 | 0.532 → | wr_js=0.363, activity=0.226 | conditional 降权 + interest 分化 | conditional 微改善，其他不变 |
+| R4 | _(待填)_ | _(待填)_ | DeepSeek full pipeline | _(待填)_ |
